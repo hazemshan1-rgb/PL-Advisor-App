@@ -1,0 +1,6 @@
+{
+  "name": "Shrimp PL Advisor",
+  "description": "Offline-first decision tool for shrimp farmers — covers PL quality gating, stocking density, survival monitoring, FCR tracking, and harvest timing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
