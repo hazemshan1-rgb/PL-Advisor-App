@@ -5,7 +5,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -1894,6 +1896,22 @@ fun HarvestOptimizerTab(
         Spacer(modifier = Modifier.height(16.dp))
 
         if (result != null) {
+            // T2.4 — Harvest Calendar
+            Text(
+                "Harvest Timeline",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+            HarvestCalendarStrip(
+                stockingDate = cycle.stockingDate,
+                currentAge = cycle.currentAge,
+                optimalHoldDay = result.bestHoldScenario?.day,
+                shouldHarvestNow = result.shouldHarvestNow
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             Text("30-Day Profit Projection Trend", fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
             ProfitScenarioBarChart(
                 scenarios = result.holdScenariosList,
@@ -2724,6 +2742,32 @@ Projected profitability uplift: ${harvest?.profitDifferential?.let { String.form
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Export Daily Readings (CSV)", fontWeight = FontWeight.Bold)
                     }
+
+                    // T3.4 — XLSX export (pure-Kotlin ZIP writer, no extra dependency)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            val xlsxFile = XlsxExporter.export(context, cycle, dailyReadings)
+                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                context, "${context.packageName}.fileprovider", xlsxFile
+                            )
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                putExtra(Intent.EXTRA_SUBJECT, "Daily Readings — ${cycle.pondName}")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(intent, "Export XLSX"))
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("export_xlsx_button"),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.TableChart, contentDescription = "Export XLSX", modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Export Daily Readings (XLSX)", fontWeight = FontWeight.Bold)
+                    }
                 }
 
                 if (showCopiedToast) {
@@ -3133,6 +3177,109 @@ fun PerformanceBenchmarkTab(cycles: List<PondCycle>) {
                         Text(String.format("$%.2f", row.costPerKg), fontSize = 11.sp,
                             modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
                     }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T2.4: Harvest Calendar Strip
+// Horizontally scrollable timeline centred on today's DOC.
+// Past days = muted, current day = primary, optimal window = green band.
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+fun HarvestCalendarStrip(
+    stockingDate: Long,
+    currentAge: Int,
+    optimalHoldDay: Int?,   // additional days from today to the best harvest day
+    shouldHarvestNow: Boolean
+) {
+    val startDoc = (currentAge - 5).coerceAtLeast(0)
+    val endDoc = currentAge + 35
+    val count = endDoc - startDoc + 1
+
+    val optimalDoc = if (optimalHoldDay != null) currentAge + optimalHoldDay else null
+    val optimalLo = if (optimalDoc != null) optimalDoc - 3 else Int.MAX_VALUE
+    val optimalHi = if (optimalDoc != null) optimalDoc + 3 else Int.MIN_VALUE
+
+    val dateFormat = remember { java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()) }
+    fun docDate(doc: Int): String {
+        val cal = java.util.Calendar.getInstance()
+        cal.timeInMillis = stockingDate
+        cal.add(java.util.Calendar.DAY_OF_YEAR, doc)
+        return dateFormat.format(cal.time)
+    }
+
+    val listState = rememberLazyListState()
+    val scrollIndex = (currentAge - startDoc - 2).coerceAtLeast(0)
+    LaunchedEffect(currentAge) {
+        if (scrollIndex > 0) listState.animateScrollToItem(scrollIndex)
+    }
+
+    val primary = MaterialTheme.colorScheme.primary
+    val surfaceVar = MaterialTheme.colorScheme.surfaceVariant
+    val surface = MaterialTheme.colorScheme.surface
+    val onSurface = MaterialTheme.colorScheme.onSurface
+
+    LazyRow(
+        state = listState,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        items(count) { index ->
+            val doc = startDoc + index
+            val isPast = doc < currentAge
+            val isCurrent = doc == currentAge
+            val isOptimalPeak = doc == optimalDoc
+            val isOptimalWindow = doc in optimalLo..optimalHi && !isCurrent
+
+            val bgColor = when {
+                isCurrent       -> primary
+                isOptimalPeak   -> AquaticColors.SafeGreen
+                isOptimalWindow -> AquaticColors.SafeGreen.copy(alpha = 0.25f)
+                isPast          -> surfaceVar
+                else            -> surface
+            }
+            val labelColor = when {
+                isCurrent || isOptimalPeak -> Color.White
+                else                       -> onSurface.copy(alpha = if (isPast) 0.5f else 0.85f)
+            }
+            val subLabel = when {
+                isCurrent && shouldHarvestNow -> "NOW"
+                isCurrent                     -> "TODAY"
+                isOptimalPeak                 -> "BEST"
+                else                          -> null
+            }
+
+            Column(
+                modifier = Modifier
+                    .width(48.dp)
+                    .background(bgColor, RoundedCornerShape(8.dp))
+                    .padding(vertical = 8.dp, horizontal = 2.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    "D$doc",
+                    fontSize = 10.sp,
+                    fontWeight = if (isCurrent || isOptimalPeak) FontWeight.ExtraBold else FontWeight.Normal,
+                    color = labelColor
+                )
+                Text(
+                    docDate(doc),
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = labelColor,
+                    textAlign = TextAlign.Center
+                )
+                if (subLabel != null) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        subLabel,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White
+                    )
                 }
             }
         }
