@@ -60,18 +60,61 @@ object GeminiAdvisor {
         appendLine("PL quality scores — stress: ${cycle.stressToleranceScore}%  gut: ${cycle.gutFullnessScore}%  supplier: ${cycle.supplierScore}%")
 
         if (recentReadings.isNotEmpty()) {
-            val sorted = recentReadings.sortedBy { it.pondAge }.takeLast(14)
-            appendLine()
-            appendLine("=== Last ${sorted.size} Daily Readings ===")
-            appendLine("Day | DO  | TAN  | pH   | Temp | ABW  | Surv%")
-            appendLine("----|-----|------|------|------|------|------")
-            for (r in sorted) {
-                appendLine(
-                    String.format(
-                        "%3d | %3.1f | %4.2f | %4.2f | %4.1f | %4.1f | %5.1f",
-                        r.pondAge, r.doLevel, r.tanLevel, r.ph, r.temp, r.abw, r.survivalPct
+            val sorted = recentReadings.sortedBy { it.pondAge }
+            val totalDays = sorted.last().pondAge
+
+            // T2.5: compress old data into weekly summaries to stay within token budget
+            if (totalDays > 14) {
+                val cutoff = totalDays - 14
+                val archiveReadings = sorted.filter { it.pondAge <= cutoff }
+                val recentWindow = sorted.filter { it.pondAge > cutoff }
+
+                // Group archive by week and emit one summary line per week
+                val weekGroups = archiveReadings.groupBy { (it.pondAge - 1) / 7 + 1 }
+                appendLine()
+                appendLine("=== Historical Weekly Summaries (DOC 1–${cutoff}) ===")
+                for ((week, wReadings) in weekGroups.entries.sortedBy { it.key }) {
+                    fun avg(values: List<Double>) = if (values.isEmpty()) 0.0 else values.sum() / values.size
+                    appendLine(
+                        String.format(
+                            "Week %d: DO=%.1f  TAN=%.2f  pH=%.2f  Temp=%.1f  ABW=%.1fg  Surv=%.1f%%",
+                            week,
+                            avg(wReadings.map { it.doLevel }),
+                            avg(wReadings.map { it.tanLevel }),
+                            avg(wReadings.map { it.ph }),
+                            avg(wReadings.map { it.temp }),
+                            avg(wReadings.map { it.abw }),
+                            avg(wReadings.map { it.survivalPct })
+                        )
                     )
-                )
+                }
+
+                appendLine()
+                appendLine("=== Last 14 Days Detail (DOC ${cutoff + 1}–${totalDays}) ===")
+                appendLine("Day | DO  | TAN  | pH   | Temp | ABW  | Surv%")
+                appendLine("----|-----|------|------|------|------|------")
+                for (r in recentWindow) {
+                    appendLine(
+                        String.format(
+                            "%3d | %3.1f | %4.2f | %4.2f | %4.1f | %4.1f | %5.1f",
+                            r.pondAge, r.doLevel, r.tanLevel, r.ph, r.temp, r.abw, r.survivalPct
+                        )
+                    )
+                }
+            } else {
+                val window = sorted.takeLast(14)
+                appendLine()
+                appendLine("=== Last ${window.size} Daily Readings ===")
+                appendLine("Day | DO  | TAN  | pH   | Temp | ABW  | Surv%")
+                appendLine("----|-----|------|------|------|------|------")
+                for (r in window) {
+                    appendLine(
+                        String.format(
+                            "%3d | %3.1f | %4.2f | %4.2f | %4.1f | %4.1f | %5.1f",
+                            r.pondAge, r.doLevel, r.tanLevel, r.ph, r.temp, r.abw, r.survivalPct
+                        )
+                    )
+                }
             }
 
             // 7-day trend analysis: compare first-half avg vs second-half avg
@@ -218,6 +261,9 @@ object GeminiAdvisor {
                     ?.text
                     ?.trim()
                     ?: "No response generated. Please try again."
+            } catch (e: java.io.IOException) {
+                // T3.5: offline fallback — network unreachable
+                AdvisorEngine.generateOfflineAdvice(cycle)
             } catch (e: Exception) {
                 "Connection error: ${e.message ?: "Unable to reach AI advisor."}"
             }

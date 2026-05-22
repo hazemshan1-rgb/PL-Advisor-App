@@ -1,6 +1,9 @@
 package com.shrimpadvisor.plcycle.ui
 
+import com.shrimpadvisor.plcycle.data.DailyReading
+import com.shrimpadvisor.plcycle.data.PondCycle
 import com.shrimpadvisor.plcycle.data.RegionProfile
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -384,6 +387,7 @@ object AdvisorEngine {
         aerationCost: Double,
         probioticCost: Double,
         laborCost: Double,
+        currentAge: Int = 1,
         mortalityRatePerDay: Double = 0.004,
         mortalityAcceleration: Double = 0.0,
         regionProfile: RegionProfile? = null
@@ -394,6 +398,11 @@ object AdvisorEngine {
         val currentBiomass = max(1.0, currentShrimpQty * (currentAbw / 1000.0))
         val currentPrice = getPricePerKg(currentAbw, regionProfile)
         val currentRevenue = currentBiomass * currentPrice
+
+        // Bug fix: derive daily feed rate from actual historical consumption instead of hardcoded 2.5%
+        val historicalDailyFeedRate = if (currentAge > 0 && currentBiomass > 0) {
+            (totalFeed / currentAge.toDouble() / currentBiomass).coerceIn(0.01, 0.08)
+        } else 0.03
 
         fun runSimulation(baseRate: Double, acceleration: Double): HarvestOptimizerResult {
             val scenariosList = mutableListOf<HoldScenario>()
@@ -409,7 +418,7 @@ object AdvisorEngine {
                 val projectedPrice = getPricePerKg(projectedWeight, regionProfile)
                 val projectedRevenue = projectedBiomass * projectedPrice
 
-                val dailyFeedCost = projectedBiomass * 0.025 * feedCostPerKg
+                val dailyFeedCost = projectedBiomass * historicalDailyFeedRate * feedCostPerKg
                 accumulatedCost += aerationCost + probioticCost + laborCost + dailyFeedCost
 
                 val netAddedGain = projectedRevenue - currentRevenue - accumulatedCost
@@ -450,5 +459,190 @@ object AdvisorEngine {
         val diseaseResult = runSimulation(diseaseScenarioRate, mortalityAcceleration)
 
         return normalResult.copy(scenarioResult = diseaseResult)
+    }
+
+    // ----------------------------------------------------
+    // Module 6: Daily Feed Recommendation Engine (T1.1)
+    // ----------------------------------------------------
+    data class FeedRecommendation(
+        val recommendedKgPerDay: Double,
+        val feedRatePct: Double,
+        val adjustmentNote: String
+    )
+
+    fun recommendDailyFeed(biomassKg: Double, tempC: Double): FeedRecommendation {
+        val baseRate = 0.04
+        val tempAdj = when {
+            tempC < 22.0 -> -0.02
+            tempC < 26.0 -> -0.01 * ((26.0 - tempC) / 4.0)
+            tempC > 32.0 -> -0.005
+            else -> 0.0
+        }
+        val adjustedRate = (baseRate + tempAdj).coerceIn(0.01, 0.06)
+        val note = when {
+            tempC < 22.0 -> "Reduced 50% — temp ${tempC}°C suppresses metabolism"
+            tempC < 26.0 -> "Reduced — temp ${tempC}°C below optimal 26°C"
+            tempC > 32.0 -> "Slightly reduced — temp ${tempC}°C above 32°C"
+            else -> "Standard 4% rate — temp ${tempC}°C is optimal"
+        }
+        return FeedRecommendation(
+            recommendedKgPerDay = biomassKg * adjustedRate,
+            feedRatePct = adjustedRate * 100.0,
+            adjustmentNote = note
+        )
+    }
+
+    // ----------------------------------------------------
+    // Module 7: Predictive Mortality Alert (T1.2)
+    // ----------------------------------------------------
+    data class SurvivalForecast(
+        val forecastDay3: Double,
+        val forecastDay7: Double,
+        val slope: Double,
+        val trend: String,
+        val alertThreshold: Double,
+        val isAlert: Boolean
+    )
+
+    fun predictSurvival(
+        readings: List<DailyReading>,
+        alertThreshold: Double = 85.0
+    ): SurvivalForecast? {
+        val recent = readings.sortedBy { it.pondAge }.takeLast(7)
+        if (recent.size < 3) return null
+
+        val n = recent.size.toDouble()
+        val sumX = recent.sumOf { it.pondAge.toDouble() }
+        val sumY = recent.sumOf { it.survivalPct }
+        val sumXY = recent.sumOf { it.pondAge.toDouble() * it.survivalPct }
+        val sumX2 = recent.sumOf { it.pondAge.toDouble().pow(2) }
+        val denom = n * sumX2 - sumX.pow(2)
+
+        if (denom == 0.0) return null
+
+        val slope = (n * sumXY - sumX * sumY) / denom
+        val intercept = (sumY - slope * sumX) / n
+        val lastAge = recent.last().pondAge.toDouble()
+
+        val day3 = (slope * (lastAge + 3) + intercept).coerceIn(0.0, 100.0)
+        val day7 = (slope * (lastAge + 7) + intercept).coerceIn(0.0, 100.0)
+
+        val trend = when {
+            slope < -0.5 -> "Declining rapidly (${String.format("%.2f", slope)}%/day)"
+            slope < -0.1 -> "Declining (${String.format("%.2f", slope)}%/day)"
+            slope < 0.1  -> "Stable"
+            else         -> "Improving (${String.format("%.2f", slope)}%/day)"
+        }
+
+        return SurvivalForecast(day3, day7, slope, trend, alertThreshold, day3 < alertThreshold)
+    }
+
+    // ----------------------------------------------------
+    // Module 8: Temperature-Adjusted FCR (T1.5)
+    // ----------------------------------------------------
+    fun adjustFcrForTemp(rawFcr: Double, tempC: Double): Double {
+        val factor = if (tempC < 26.0) 1.0 + 0.02 * (26.0 - tempC) else 1.0
+        return rawFcr * factor
+    }
+
+    // ----------------------------------------------------
+    // Module 9: Disease Risk Composite Score (T2.3)
+    // ----------------------------------------------------
+    data class DiseaseRisk(
+        val score: Int,
+        val level: String,
+        val factors: List<String>
+    )
+
+    fun calculateDiseaseRisk(
+        currentAge: Int,
+        estimatedSurvival: Double,
+        tanLevel: Double,
+        temp: Double,
+        doLevel: Double,
+        ph: Double
+    ): DiseaseRisk {
+        val factors = mutableListOf<String>()
+        var score = 0
+
+        val ageScore = when {
+            currentAge < 10 -> 5
+            currentAge < 20 -> 10
+            currentAge < 40 -> 20
+            currentAge < 60 -> 15
+            else -> 10
+        }
+        score += ageScore
+
+        val tanScore = when {
+            tanLevel >= 1.0 -> 30
+            tanLevel >= 0.8 -> 20
+            tanLevel >= 0.5 -> 10
+            else -> 0
+        }
+        if (tanScore > 0) factors.add("High TAN: ${String.format("%.2f", tanLevel)} ppm")
+        score += tanScore
+
+        val expectedSurv = evaluateSurvival(currentAge, estimatedSurvival, doLevel, tanLevel, ph).expectedSurvival
+        val survDev = expectedSurv - estimatedSurvival
+        val survScore = when {
+            survDev > 15 -> 30
+            survDev > 5  -> 15
+            survDev > 0  -> 5
+            else         -> 0
+        }
+        if (survScore > 0) factors.add("Survival ${String.format("%.0f", survDev)}% below target")
+        score += survScore
+
+        val tempDev = abs(temp - 28.0)
+        val tempScore = when {
+            tempDev > 6 -> 20
+            tempDev > 3 -> 10
+            tempDev > 1 -> 5
+            else -> 0
+        }
+        if (tempScore > 0) factors.add("Temp deviation: ${temp}°C (optimal 28°C)")
+        score += tempScore
+
+        val level = when {
+            score >= 60 -> "HIGH"
+            score >= 35 -> "MODERATE"
+            else -> "LOW"
+        }
+
+        return DiseaseRisk(score.coerceIn(0, 100), level, factors)
+    }
+
+    // ----------------------------------------------------
+    // Module 10: Offline Rule-Based Advice (T3.5)
+    // ----------------------------------------------------
+    fun generateOfflineAdvice(cycle: PondCycle): String {
+        val cost = evaluateCosts(
+            pondSize = cycle.pondSize, proposedDensity = cycle.proposedDensity,
+            estimatedSurvival = cycle.estimatedSurvival, currentAbw = cycle.currentAbw,
+            age = cycle.currentAge, totalFeed = cycle.totalFeedConsumed,
+            plUnitCost = cycle.plUnitCost, feedCostPerKg = cycle.feedCostPerKg,
+            aerationCost = cycle.aerationCostPerDay, probioticCost = cycle.probioticCostPerDay,
+            laborCost = cycle.laborCostPerDay
+        )
+        val surv = evaluateSurvival(cycle.currentAge, cycle.estimatedSurvival, cycle.doLevel, cycle.tanLevel, cycle.ph)
+        val fcrRating = when {
+            cost.fcr < 1.1  -> "unusually low — verify stock counts"
+            cost.fcr < 1.5  -> "excellent"
+            cost.fcr < 1.8  -> "elevated — review feeding schedule"
+            else            -> "critical — immediate action required"
+        }
+        return buildString {
+            appendLine("[Offline Mode] AI advisor is unavailable. Rule-based summary:")
+            appendLine()
+            appendLine("Survival: ${String.format("%.1f", cycle.estimatedSurvival)}% (expected ${String.format("%.1f", surv.expectedSurvival)}%) — ${surv.classification}")
+            appendLine("FCR: ${String.format("%.2f", cost.fcr)} — $fcrRating")
+            appendLine("Cost/kg: \$${String.format("%.2f", cost.costPerKg)}")
+            appendLine("Biomass: ${String.format("%.0f", cost.currentBiomass)} kg")
+            if (surv.status != SurvivalStatus.GREEN) {
+                appendLine()
+                appendLine("Action: ${surv.actionSteps.firstOrNull() ?: "Monitor water quality closely."}")
+            }
+        }.trim()
     }
 }

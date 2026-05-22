@@ -21,8 +21,17 @@ class PondCycleRepository(
     suspend fun insertDailyReading(reading: DailyReading): Long =
         dailyReadingDao.insert(reading)
 
+    suspend fun updateDailyReading(reading: DailyReading) =
+        dailyReadingDao.update(reading)
+
     suspend fun deleteDailyReading(reading: DailyReading) =
         dailyReadingDao.delete(reading)
+
+    fun getRecentReadingsForCycle(cycleId: Int, limit: Int): Flow<List<DailyReading>> =
+        dailyReadingDao.getRecentReadingsForCycle(cycleId, limit)
+
+    fun getTotalFeedGiven(cycleId: Int): Flow<Double?> =
+        dailyReadingDao.getTotalFeedGiven(cycleId)
 
     // Region profile operations
     val allRegionProfiles: Flow<List<RegionProfile>> = regionProfileDao.getAllProfiles()

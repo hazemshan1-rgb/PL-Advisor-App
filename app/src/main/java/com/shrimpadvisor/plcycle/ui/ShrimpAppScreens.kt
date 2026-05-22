@@ -186,6 +186,10 @@ fun ShrimpAppMainContainer(
     val isAiLoading by viewModel.isAiLoading.collectAsStateWithLifecycle()
     val allRegionProfiles by viewModel.allRegionProfiles.collectAsStateWithLifecycle()
     val activeRegionProfile by viewModel.activeRegionProfile.collectAsStateWithLifecycle()
+    val feedRecommendation by viewModel.feedRecommendation.collectAsStateWithLifecycle()
+    val survivalForecast by viewModel.survivalForecast.collectAsStateWithLifecycle()
+    val diseaseRisk by viewModel.diseaseRisk.collectAsStateWithLifecycle()
+    val tempAdjustedFcr by viewModel.tempAdjustedFcr.collectAsStateWithLifecycle()
 
     var activeTab by remember { mutableStateOf(0) }
     var showNewPondDialog by remember { mutableStateOf(false) }
@@ -258,7 +262,10 @@ fun ShrimpAppMainContainer(
                     Pair("FCR & Cost", Icons.Default.Payments),
                     Pair("Optimizer", Icons.Default.TrendingUp),
                     Pair("AI Advisor", Icons.Default.SmartToy),
-                    Pair("Report", Icons.Default.Summarize)
+                    Pair("Report", Icons.Default.Summarize),
+                    Pair("History", Icons.Default.History),
+                    Pair("Compare", Icons.Default.CompareArrows),
+                    Pair("Stats", Icons.Default.BarChart)
                 ).forEachIndexed { index, (label, icon) ->
                     Tab(
                         selected = activeTab == index,
@@ -307,6 +314,9 @@ fun ShrimpAppMainContainer(
                                 survival = survival,
                                 cost = cost,
                                 harvest = harvest,
+                                feedRecommendation = feedRecommendation,
+                                survivalForecast = survivalForecast,
+                                diseaseRisk = diseaseRisk,
                                 onNavigateToTab = { activeTab = it }
                             )
                             1 -> PlGateTab(
@@ -324,11 +334,12 @@ fun ShrimpAppMainContainer(
                                 result = survival,
                                 onUpdate = { viewModel.updateActiveCycle(it) },
                                 dailyReadings = activeReadings,
-                                onLogReading = { viewModel.logDailyReading() }
+                                onLogReading = { feedGiven -> viewModel.logDailyReading(feedGiven) }
                             )
                             4 -> CostTrackerTab(
                                 cycle = activeCycle!!,
                                 result = cost,
+                                tempAdjustedFcr = tempAdjustedFcr,
                                 onUpdate = { viewModel.updateActiveCycle(it) }
                             )
                             5 -> HarvestOptimizerTab(
@@ -337,6 +348,7 @@ fun ShrimpAppMainContainer(
                                 regionProfiles = allRegionProfiles,
                                 activeRegionProfile = activeRegionProfile,
                                 onUpdate = { viewModel.updateActiveCycle(it) },
+                                onLinkRegionProfile = { profileId -> viewModel.linkRegionProfile(profileId) },
                                 onSaveRegionProfile = { viewModel.saveRegionProfile(it) },
                                 onDeleteRegionProfile = { viewModel.deleteRegionProfile(it) }
                             )
@@ -354,6 +366,17 @@ fun ShrimpAppMainContainer(
                                 cost = cost,
                                 harvest = harvest,
                                 dailyReadings = activeReadings
+                            )
+                            8 -> ReadingHistoryTab(
+                                readings = activeReadings,
+                                onDelete = { viewModel.deleteDailyReading(it) }
+                            )
+                            9 -> PondComparisonTab(
+                                cycles = cycles,
+                                allRegionProfiles = allRegionProfiles
+                            )
+                            10 -> PerformanceBenchmarkTab(
+                                cycles = cycles
                             )
                         }
                     }
@@ -485,6 +508,9 @@ fun DashboardOverviewTab(
     survival: AdvisorEngine.SurvivalTrajectoryResult?,
     cost: AdvisorEngine.CostTrackingResult?,
     harvest: AdvisorEngine.HarvestOptimizerResult?,
+    feedRecommendation: AdvisorEngine.FeedRecommendation? = null,
+    survivalForecast: AdvisorEngine.SurvivalForecast? = null,
+    diseaseRisk: AdvisorEngine.DiseaseRisk? = null,
     onNavigateToTab: (Int) -> Unit
 ) {
     LazyColumn(
@@ -699,6 +725,109 @@ fun DashboardOverviewTab(
                 icon = Icons.Default.TrendingUp,
                 onClick = { onNavigateToTab(5) }
             )
+        }
+
+        // T1.1 — Feed Recommendation
+        feedRecommendation?.let { rec ->
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = AquaticColors.ElectricTeal.copy(alpha = 0.08f)),
+                    border = BorderStroke(1.dp, AquaticColors.ElectricTeal.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Default.Restaurant, contentDescription = null,
+                            tint = AquaticColors.ElectricTeal, modifier = Modifier.size(22.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Today's Feed Recommendation", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                color = AquaticColors.ElectricTeal)
+                            Text(rec.adjustmentNote, fontSize = 11.sp, color = AquaticColors.SoftMutedText)
+                        }
+                        Text(
+                            String.format("%.1f kg", rec.recommendedKgPerDay),
+                            fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
+                            color = AquaticColors.ElectricTeal
+                        )
+                    }
+                }
+            }
+        }
+
+        // T1.2 — Survival Forecast Alert
+        survivalForecast?.let { fc ->
+            if (fc.isAlert) {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = AquaticColors.AlarmRed.copy(alpha = 0.08f)),
+                        border = BorderStroke(1.5.dp, AquaticColors.AlarmRed.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(Icons.Default.Warning, contentDescription = null,
+                                tint = AquaticColors.AlarmRed, modifier = Modifier.size(22.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Survival Forecast Alert", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                    color = AquaticColors.AlarmRed)
+                                Text("Trend: ${fc.trend}", fontSize = 11.sp, color = AquaticColors.SoftMutedText)
+                                Text(
+                                    "3-day: ${String.format("%.1f", fc.forecastDay3)}%  |  7-day: ${String.format("%.1f", fc.forecastDay7)}%",
+                                    fontSize = 11.sp, color = AquaticColors.AlarmRed
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // T2.3 — Disease Risk Score
+        diseaseRisk?.let { risk ->
+            item {
+                val riskColor = when (risk.level) {
+                    "HIGH" -> AquaticColors.AlarmRed
+                    "MODERATE" -> AquaticColors.SandGold
+                    else -> AquaticColors.SafeGreen
+                }
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = riskColor.copy(alpha = 0.08f)),
+                    border = BorderStroke(1.dp, riskColor.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Default.BioTech, contentDescription = null,
+                            tint = riskColor, modifier = Modifier.size(22.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Disease Risk Index", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                color = riskColor)
+                            if (risk.factors.isNotEmpty()) {
+                                Text(risk.factors.joinToString(" · "), fontSize = 10.sp,
+                                    color = AquaticColors.SoftMutedText, lineHeight = 14.sp)
+                            } else {
+                                Text("All parameters within safe range", fontSize = 11.sp, color = AquaticColors.SoftMutedText)
+                            }
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("${risk.score}/100", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = riskColor)
+                            Text(risk.level, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = riskColor)
+                        }
+                    }
+                }
+            }
         }
 
         item {
@@ -1204,8 +1333,9 @@ fun SurvivalMonitorTab(
     result: AdvisorEngine.SurvivalTrajectoryResult?,
     onUpdate: ((PondCycle) -> PondCycle) -> Unit,
     dailyReadings: List<DailyReading> = emptyList(),
-    onLogReading: () -> Unit = {}
+    onLogReading: (Double) -> Unit = {}
 ) {
+    var feedGivenInput by remember { mutableStateOf("") }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1254,21 +1384,35 @@ fun SurvivalMonitorTab(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Log today's reading button
+        // Log today's reading — with optional feed given field
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = "${dailyReadings.size} reading(s) logged",
                 fontSize = 12.sp,
-                color = AquaticColors.SoftMutedText
+                color = AquaticColors.SoftMutedText,
+                modifier = Modifier.weight(1f)
             )
-            OutlinedButton(onClick = onLogReading) {
+            OutlinedTextField(
+                value = feedGivenInput,
+                onValueChange = { feedGivenInput = it },
+                label = { Text("Feed given (kg)", fontSize = 10.sp) },
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.width(120.dp),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary)
+            )
+            OutlinedButton(onClick = {
+                val feedKg = feedGivenInput.toDoubleOrNull() ?: 0.0
+                onLogReading(feedKg)
+                feedGivenInput = ""
+            }) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Log Today", fontSize = 12.sp)
+                Text("Log", fontSize = 12.sp)
             }
         }
 
@@ -1347,6 +1491,7 @@ fun SurvivalMonitorTab(
 fun CostTrackerTab(
     cycle: PondCycle,
     result: AdvisorEngine.CostTrackingResult?,
+    tempAdjustedFcr: Double? = null,
     onUpdate: ((PondCycle) -> PondCycle) -> Unit
 ) {
     Column(
@@ -1486,6 +1631,17 @@ fun CostTrackerTab(
                         Text("Feeding Efficiency", fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                         Spacer(modifier = Modifier.height(8.dp))
                         FcrGauge(fcr = result.fcr)
+                        // T1.5 — temperature-adjusted FCR
+                        tempAdjustedFcr?.let { adj ->
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Temp-adj: ${String.format("%.2f", adj)}",
+                                fontSize = 10.sp,
+                                color = AquaticColors.SoftMutedText,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
                 }
 
@@ -1549,6 +1705,7 @@ fun HarvestOptimizerTab(
     regionProfiles: List<RegionProfile> = emptyList(),
     activeRegionProfile: RegionProfile? = null,
     onUpdate: ((PondCycle) -> PondCycle) -> Unit,
+    onLinkRegionProfile: (Int?) -> Unit = {},
     onSaveRegionProfile: (RegionProfile) -> Unit = {},
     onDeleteRegionProfile: (RegionProfile) -> Unit = {}
 ) {
@@ -1566,7 +1723,7 @@ fun HarvestOptimizerTab(
             regionProfiles = regionProfiles,
             activeRegionProfile = activeRegionProfile,
             onSelectProfile = { selected ->
-                onUpdate { it.copy(regionProfileId = selected?.id) }
+                onLinkRegionProfile(selected?.id)
             },
             onSaveProfile = onSaveRegionProfile,
             onDeleteProfile = onDeleteRegionProfile
@@ -2655,4 +2812,329 @@ fun NewPondDialog(
             }
         }
     )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tab 8: Reading History (T2.1)
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+fun ReadingHistoryTab(
+    readings: List<DailyReading>,
+    onDelete: (DailyReading) -> Unit
+) {
+    val sorted = remember(readings) { readings.sortedByDescending { it.timestamp } }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(14.dp)
+    ) {
+        Text(
+            "Daily Reading Log",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Text(
+            "${sorted.size} readings recorded",
+            fontSize = 11.sp,
+            color = AquaticColors.SoftMutedText
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (sorted.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No readings logged yet.\nUse the Survival tab to log your first reading.",
+                    textAlign = TextAlign.Center, color = AquaticColors.SoftMutedText, fontSize = 13.sp)
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(sorted, key = { it.id }) { reading ->
+                    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(10.dp)),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text("DOC", fontSize = 8.sp, color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold)
+                                Text("${reading.pondAge}", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.primary)
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    ReadingChip("DO", String.format("%.1f", reading.doLevel),
+                                        if (reading.doLevel < 5.3) AquaticColors.AlarmRed else AquaticColors.SafeGreen)
+                                    ReadingChip("TAN", String.format("%.2f", reading.tanLevel),
+                                        if (reading.tanLevel >= 0.8) AquaticColors.AlarmRed else AquaticColors.SafeGreen)
+                                    ReadingChip("pH", String.format("%.1f", reading.ph),
+                                        if (reading.ph < 7.3 || reading.ph > 8.7) AquaticColors.AlarmRed else AquaticColors.SafeGreen)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    ReadingChip("ABW", "${String.format("%.1f", reading.abw)}g",
+                                        AquaticColors.ElectricTeal)
+                                    ReadingChip("Surv", "${String.format("%.0f", reading.survivalPct)}%",
+                                        AquaticColors.TealWater)
+                                    if (reading.feedGiven > 0) {
+                                        ReadingChip("Feed", "${String.format("%.1f", reading.feedGiven)}kg",
+                                            AquaticColors.SandGold)
+                                    }
+                                }
+                            }
+
+                            IconButton(onClick = { showDeleteConfirm = true },
+                                modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete",
+                                    tint = AquaticColors.AlarmRed.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+
+                    if (showDeleteConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showDeleteConfirm = false },
+                            title = { Text("Delete Reading?") },
+                            text = { Text("Remove DOC ${reading.pondAge} reading. This cannot be undone.") },
+                            confirmButton = {
+                                TextButton(onClick = { onDelete(reading); showDeleteConfirm = false }) {
+                                    Text("Delete", color = AquaticColors.AlarmRed)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadingChip(label: String, value: String, color: Color) {
+    Row(
+        modifier = Modifier
+            .background(color.copy(alpha = 0.1f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, fontSize = 9.sp, color = color, fontWeight = FontWeight.Bold)
+        Text(value, fontSize = 10.sp, color = color)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tab 9: Multi-Pond Comparison (T1.4)
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+fun PondComparisonTab(
+    cycles: List<PondCycle>,
+    allRegionProfiles: List<RegionProfile>
+) {
+    data class PondSnapshot(
+        val cycle: PondCycle,
+        val survivalStatus: AdvisorEngine.SurvivalStatus,
+        val fcr: Double,
+        val costPerKg: Double,
+        val biomass: Double
+    )
+
+    val snapshots = remember(cycles, allRegionProfiles) {
+        cycles.map { c ->
+            val profile = allRegionProfiles.firstOrNull { it.id == c.regionProfileId }
+            val cost = AdvisorEngine.evaluateCosts(
+                pondSize = c.pondSize, proposedDensity = c.proposedDensity,
+                estimatedSurvival = c.estimatedSurvival, currentAbw = c.currentAbw,
+                age = c.currentAge, totalFeed = c.totalFeedConsumed,
+                plUnitCost = c.plUnitCost,
+                feedCostPerKg = profile?.feedCostDefault ?: c.feedCostPerKg,
+                aerationCost = profile?.aerationCostDefault ?: c.aerationCostPerDay,
+                probioticCost = profile?.probioticCostDefault ?: c.probioticCostPerDay,
+                laborCost = profile?.laborCostDefault ?: c.laborCostPerDay
+            )
+            val surv = AdvisorEngine.evaluateSurvival(c.currentAge, c.estimatedSurvival,
+                c.doLevel, c.tanLevel, c.ph)
+            PondSnapshot(c, surv.status, cost.fcr, cost.costPerKg, cost.currentBiomass)
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(14.dp)) {
+        Text("Pond Comparison", fontSize = 16.sp, fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary)
+        Text("Side-by-side health & economics across all active ponds",
+            fontSize = 11.sp, color = AquaticColors.SoftMutedText)
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (snapshots.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No ponds available.", color = AquaticColors.SoftMutedText)
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(snapshots, key = { it.cycle.id }) { snap ->
+                    val survColor = when (snap.survivalStatus) {
+                        AdvisorEngine.SurvivalStatus.GREEN  -> AquaticColors.SafeGreen
+                        AdvisorEngine.SurvivalStatus.YELLOW -> AquaticColors.SandGold
+                        AdvisorEngine.SurvivalStatus.RED    -> AquaticColors.AlarmRed
+                    }
+                    val fcrColor = when {
+                        snap.fcr < 1.5  -> AquaticColors.SafeGreen
+                        snap.fcr < 1.8  -> AquaticColors.SandGold
+                        else            -> AquaticColors.AlarmRed
+                    }
+
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(snap.cycle.pondName, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                    Text("DOC ${snap.cycle.currentAge}  ·  ${String.format("%.0f", snap.cycle.pondSize)} m²",
+                                        fontSize = 11.sp, color = AquaticColors.SoftMutedText)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .background(survColor.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(snap.survivalStatus.name, fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold, color = survColor)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                CompareMetric("Survival",
+                                    "${String.format("%.0f", snap.cycle.estimatedSurvival)}%", survColor)
+                                CompareMetric("FCR", String.format("%.2f", snap.fcr), fcrColor)
+                                CompareMetric("$/kg", String.format("$%.2f", snap.costPerKg),
+                                    AquaticColors.ElectricTeal)
+                                CompareMetric("Biomass", "${String.format("%.0f", snap.biomass)}kg",
+                                    MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompareMetric(label: String, value: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = color)
+        Text(label, fontSize = 9.sp, color = AquaticColors.SoftMutedText, fontWeight = FontWeight.Bold)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tab 10: Performance Benchmarking (T3.3)
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+fun PerformanceBenchmarkTab(cycles: List<PondCycle>) {
+    data class BenchRow(val name: String, val doc: Int, val survival: Double, val fcr: Double, val costPerKg: Double)
+
+    val rows = remember(cycles) {
+        cycles.map { c ->
+            val cost = AdvisorEngine.evaluateCosts(
+                pondSize = c.pondSize, proposedDensity = c.proposedDensity,
+                estimatedSurvival = c.estimatedSurvival, currentAbw = c.currentAbw,
+                age = c.currentAge, totalFeed = c.totalFeedConsumed,
+                plUnitCost = c.plUnitCost, feedCostPerKg = c.feedCostPerKg,
+                aerationCost = c.aerationCostPerDay, probioticCost = c.probioticCostPerDay,
+                laborCost = c.laborCostPerDay
+            )
+            BenchRow(c.pondName, c.currentAge, c.estimatedSurvival, cost.fcr, cost.costPerKg)
+        }.sortedByDescending { it.survival }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(14.dp)) {
+        Text("Performance Benchmarks", fontSize = 16.sp, fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary)
+        Text("All ponds ranked by survival — highest first",
+            fontSize = 11.sp, color = AquaticColors.SoftMutedText)
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (rows.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No pond data available.", color = AquaticColors.SoftMutedText)
+            }
+        } else {
+            // Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                listOf("Pond", "DOC", "Surv%", "FCR", "$/kg").forEach { h ->
+                    Text(h, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                items(rows) { row ->
+                    val fcrColor = when {
+                        row.fcr < 1.5  -> AquaticColors.SafeGreen
+                        row.fcr < 1.8  -> AquaticColors.SandGold
+                        else           -> AquaticColors.AlarmRed
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(row.name.take(10), fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                        Text("${row.doc}", fontSize = 11.sp,
+                            modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                        Text("${String.format("%.0f", row.survival)}%", fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold, color = AquaticColors.SafeGreen,
+                            modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                        Text(String.format("%.2f", row.fcr), fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold, color = fcrColor,
+                            modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                        Text(String.format("$%.2f", row.costPerKg), fontSize = 11.sp,
+                            modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                    }
+                }
+            }
+        }
+    }
 }

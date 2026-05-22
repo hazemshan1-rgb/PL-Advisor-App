@@ -28,5 +28,6 @@ data class DailyReading(
     val ph: Double,
     val temp: Double,
     val abw: Double,
-    val notes: String = ""
+    val notes: String = "",
+    val feedGiven: Double = 0.0  // kg of feed dispensed this period
 )

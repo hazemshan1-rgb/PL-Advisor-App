@@ -31,8 +31,6 @@ class PondCycleViewModel(
 
     init {
         viewModelScope.launch {
-            // Use repository.allCycles directly (cold Flow) so we wait for Room to emit
-            // the actual DB state rather than the StateFlow's emptyList() initial value.
             val firstEmission = repository.allCycles.first()
             if (firstEmission.isNotEmpty()) {
                 if (_activeCycle.value == null) {
@@ -44,6 +42,16 @@ class PondCycleViewModel(
                 _activeCycle.value = default.copy(id = idLong.toInt())
             }
         }
+
+        // T1.3 — schedule WQ alert worker on every app launch (6-hour check)
+        val wqRequest = androidx.work.PeriodicWorkRequestBuilder<com.shrimpadvisor.plcycle.WaterQualityAlertWorker>(
+            6, java.util.concurrent.TimeUnit.HOURS
+        ).addTag(com.shrimpadvisor.plcycle.WaterQualityAlertWorker.WORK_TAG).build()
+        androidx.work.WorkManager.getInstance(application).enqueueUniquePeriodicWork(
+            com.shrimpadvisor.plcycle.WaterQualityAlertWorker.WORK_TAG,
+            androidx.work.ExistingPeriodicWorkPolicy.KEEP,
+            wqRequest
+        )
     }
 
     // Daily readings for the currently active cycle
@@ -175,7 +183,7 @@ class PondCycleViewModel(
         }
     }
 
-    fun logDailyReading() {
+    fun logDailyReading(feedGiven: Double = 0.0) {
         val cycle = _activeCycle.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
             repository.insertDailyReading(
@@ -187,8 +195,31 @@ class PondCycleViewModel(
                     tanLevel = cycle.tanLevel,
                     ph = cycle.ph,
                     temp = cycle.temp,
-                    abw = cycle.currentAbw
+                    abw = cycle.currentAbw,
+                    feedGiven = feedGiven.coerceAtLeast(0.0)
                 )
+            )
+        }
+    }
+
+    fun updateDailyReading(reading: DailyReading) {
+        viewModelScope.launch(Dispatchers.IO) { repository.updateDailyReading(reading) }
+    }
+
+    fun deleteDailyReading(reading: DailyReading) {
+        viewModelScope.launch(Dispatchers.IO) { repository.deleteDailyReading(reading) }
+    }
+
+    // Bug #3 fix: link a region profile AND auto-populate cost fields from its defaults
+    fun linkRegionProfile(profileId: Int?) {
+        val profile = if (profileId != null) allRegionProfiles.value.firstOrNull { it.id == profileId } else null
+        updateActiveCycle { cycle ->
+            cycle.copy(
+                regionProfileId = profileId,
+                feedCostPerKg = profile?.feedCostDefault ?: cycle.feedCostPerKg,
+                aerationCostPerDay = profile?.aerationCostDefault ?: cycle.aerationCostPerDay,
+                probioticCostPerDay = profile?.probioticCostDefault ?: cycle.probioticCostPerDay,
+                laborCostPerDay = profile?.laborCostDefault ?: cycle.laborCostPerDay
             )
         }
     }
@@ -281,9 +312,43 @@ class PondCycleViewModel(
                 aerationCost = profile?.aerationCostDefault ?: it.aerationCostPerDay,
                 probioticCost = profile?.probioticCostDefault ?: it.probioticCostPerDay,
                 laborCost = profile?.laborCostDefault ?: it.laborCostPerDay,
+                currentAge = it.currentAge,
                 mortalityRatePerDay = it.customMortalityRate,
                 mortalityAcceleration = it.mortalityAcceleration,
                 regionProfile = profile
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    // T1.1 — daily feed recommendation
+    val feedRecommendation = combine(activeCycle, costResult) { cycle, cost ->
+        cycle ?: return@combine null
+        val biomass = cost?.currentBiomass ?: return@combine null
+        AdvisorEngine.recommendDailyFeed(biomass, cycle.temp)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    // T1.2 — predictive survival alert (uses last 7 readings)
+    val survivalForecast: StateFlow<AdvisorEngine.SurvivalForecast?> = activeReadings
+        .map { readings -> AdvisorEngine.predictSurvival(readings) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    // T1.5 — temperature-adjusted FCR
+    val tempAdjustedFcr: StateFlow<Double?> = combine(activeCycle, costResult) { cycle, cost ->
+        val fcr = cost?.fcr ?: return@combine null
+        val temp = cycle?.temp ?: return@combine null
+        AdvisorEngine.adjustFcrForTemp(fcr, temp)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    // T2.3 — disease risk score
+    val diseaseRisk: StateFlow<AdvisorEngine.DiseaseRisk?> = activeCycle.map { cycle ->
+        cycle?.let {
+            AdvisorEngine.calculateDiseaseRisk(
+                currentAge = it.currentAge,
+                estimatedSurvival = it.estimatedSurvival,
+                tanLevel = it.tanLevel,
+                temp = it.temp,
+                doLevel = it.doLevel,
+                ph = it.ph
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
