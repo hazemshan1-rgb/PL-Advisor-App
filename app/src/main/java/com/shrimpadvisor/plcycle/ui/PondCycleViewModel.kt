@@ -230,7 +230,9 @@ class PondCycleViewModel(
                 feedCostPerKg = it.feedCostPerKg,
                 aerationCost = it.aerationCostPerDay,
                 probioticCost = it.probioticCostPerDay,
-                laborCost = it.laborCostPerDay
+                laborCost = it.laborCostPerDay,
+                mortalityRatePerDay = it.customMortalityRate,
+                mortalityAcceleration = it.mortalityAcceleration
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)

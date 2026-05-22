@@ -39,5 +39,9 @@ data class PondCycle(
     val plUnitCost: Double = 0.012, // USD/PL (e.g. 1.2 cents)
     val aerationCostPerDay: Double = 8.0, // USD/day
     val probioticCostPerDay: Double = 3.0, // USD/day
-    val laborCostPerDay: Double = 4.0 // USD/day
+    val laborCostPerDay: Double = 4.0, // USD/day
+
+    // Mortality Configuration
+    val customMortalityRate: Double = 0.004, // fraction per day (0.004 = 0.4%/day)
+    val mortalityAcceleration: Double = 0.0  // added fraction per day each week (0.0005 = +0.05%/day per week)
 )
