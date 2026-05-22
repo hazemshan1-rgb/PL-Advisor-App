@@ -23,7 +23,7 @@ class MainActivity : ComponentActivity() {
 
         // Construct Database and Repository elements
         val database = PondCycleDatabase.getDatabase(this)
-        val repository = PondCycleRepository(database.pondCycleDao(), database.dailyReadingDao())
+        val repository = PondCycleRepository(database.pondCycleDao(), database.dailyReadingDao(), database.regionProfileDao())
 
         val viewModel: PondCycleViewModel by viewModels {
             PondCycleViewModelFactory(application, repository)

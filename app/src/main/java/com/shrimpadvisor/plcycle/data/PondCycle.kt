@@ -43,5 +43,8 @@ data class PondCycle(
 
     // Mortality Configuration
     val customMortalityRate: Double = 0.004, // fraction per day (0.004 = 0.4%/day)
-    val mortalityAcceleration: Double = 0.0  // added fraction per day each week (0.0005 = +0.05%/day per week)
+    val mortalityAcceleration: Double = 0.0,  // added fraction per day each week (0.0005 = +0.05%/day per week)
+
+    // Regional Profile Link
+    val regionProfileId: Int? = null
 )

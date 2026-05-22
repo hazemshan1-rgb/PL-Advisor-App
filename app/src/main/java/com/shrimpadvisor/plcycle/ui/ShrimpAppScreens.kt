@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shrimpadvisor.plcycle.data.DailyReading
 import com.shrimpadvisor.plcycle.data.PondCycle
+import com.shrimpadvisor.plcycle.data.RegionProfile
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,6 +50,8 @@ fun ShrimpAppMainContainer(
     val activeReadings by viewModel.activeReadings.collectAsStateWithLifecycle()
     val chatMessages by viewModel.chatMessages.collectAsStateWithLifecycle()
     val isAiLoading by viewModel.isAiLoading.collectAsStateWithLifecycle()
+    val allRegionProfiles by viewModel.allRegionProfiles.collectAsStateWithLifecycle()
+    val activeRegionProfile by viewModel.activeRegionProfile.collectAsStateWithLifecycle()
 
     var activeTab by remember { mutableStateOf(0) }
     var showNewPondDialog by remember { mutableStateOf(false) }
@@ -185,7 +188,11 @@ fun ShrimpAppMainContainer(
                             5 -> HarvestOptimizerTab(
                                 cycle = activeCycle!!,
                                 result = harvest,
-                                onUpdate = { viewModel.updateActiveCycle(it) }
+                                regionProfiles = allRegionProfiles,
+                                activeRegionProfile = activeRegionProfile,
+                                onUpdate = { viewModel.updateActiveCycle(it) },
+                                onSaveRegionProfile = { viewModel.saveRegionProfile(it) },
+                                onDeleteRegionProfile = { viewModel.deleteRegionProfile(it) }
                             )
                             6 -> AiAdvisorTab(
                                 cycle = activeCycle!!,
@@ -1311,11 +1318,16 @@ fun CostRowItem(label: String, valUSD: Double) {
 /**
  * Screen 5: Harvest Window Optimizer
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HarvestOptimizerTab(
     cycle: PondCycle,
     result: AdvisorEngine.HarvestOptimizerResult?,
-    onUpdate: ((PondCycle) -> PondCycle) -> Unit
+    regionProfiles: List<RegionProfile> = emptyList(),
+    activeRegionProfile: RegionProfile? = null,
+    onUpdate: ((PondCycle) -> PondCycle) -> Unit,
+    onSaveRegionProfile: (RegionProfile) -> Unit = {},
+    onDeleteRegionProfile: (RegionProfile) -> Unit = {}
 ) {
     var showDiseaseScenario by remember { mutableStateOf(false) }
 
@@ -1326,6 +1338,19 @@ fun HarvestOptimizerTab(
             .padding(14.dp)
             .testTag("optimizer_tab")
     ) {
+        // ── Region Selector Card ──────────────────────────────────────────────
+        RegionSelectorCard(
+            regionProfiles = regionProfiles,
+            activeRegionProfile = activeRegionProfile,
+            onSelectProfile = { selected ->
+                onUpdate { it.copy(regionProfileId = selected?.id) }
+            },
+            onSaveProfile = onSaveRegionProfile,
+            onDeleteProfile = onDeleteRegionProfile
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
         Card(
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
@@ -1610,6 +1635,473 @@ fun HarvestOptimizerTab(
             }
         }
     }
+}
+
+/**
+ * Region price profile selector with read-only details panel for built-in profiles
+ * and an editable expansion panel for custom profiles.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RegionSelectorCard(
+    regionProfiles: List<RegionProfile>,
+    activeRegionProfile: RegionProfile?,
+    onSelectProfile: (RegionProfile?) -> Unit,
+    onSaveProfile: (RegionProfile) -> Unit,
+    onDeleteProfile: (RegionProfile) -> Unit
+) {
+    var dropdownExpanded by remember { mutableStateOf(false) }
+    var showEditPanel by remember { mutableStateOf(false) }
+
+    // Edit state for a custom profile being edited/created
+    var editingProfile by remember { mutableStateOf<RegionProfile?>(null) }
+
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+        modifier = Modifier.testTag("region_selector_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                "Regional Price Profile",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                "Select a market region to apply locale-specific price brackets and default input costs.",
+                fontSize = 11.sp,
+                color = AquaticColors.SoftMutedText
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Dropdown selector
+            ExposedDropdownMenuBox(
+                expanded = dropdownExpanded,
+                onExpandedChange = { dropdownExpanded = it },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = activeRegionProfile?.regionName ?: "Generic (no region selected)",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Market Region", fontSize = 11.sp) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor()
+                        .testTag("region_dropdown"),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary)
+                )
+                ExposedDropdownMenu(
+                    expanded = dropdownExpanded,
+                    onDismissRequest = { dropdownExpanded = false }
+                ) {
+                    // "None" option to clear the profile
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                "None (use manual costs)",
+                                fontSize = 13.sp,
+                                fontWeight = if (activeRegionProfile == null) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        onClick = {
+                            onSelectProfile(null)
+                            dropdownExpanded = false
+                        },
+                        modifier = Modifier.testTag("region_option_none")
+                    )
+                    regionProfiles.forEach { profile ->
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            profile.regionName,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (profile.id == activeRegionProfile?.id) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                        Text(
+                                            "${profile.currency} • 20g: ${String.format("%.1f", profile.priceAt20g)} – 40g: ${String.format("%.1f", profile.priceAt40g)}",
+                                            fontSize = 10.sp,
+                                            color = AquaticColors.SoftMutedText
+                                        )
+                                    }
+                                    if (!profile.isBuiltIn) {
+                                        IconButton(
+                                            onClick = {
+                                                onDeleteProfile(profile)
+                                                dropdownExpanded = false
+                                            },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Delete",
+                                                tint = AquaticColors.AlarmRed,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                            onClick = {
+                                onSelectProfile(profile)
+                                dropdownExpanded = false
+                            },
+                            modifier = Modifier.testTag("region_option_${profile.id}")
+                        )
+                    }
+                }
+            }
+
+            // Show price brackets and action buttons when a profile is active
+            if (activeRegionProfile != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Price Brackets & Default Costs",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (!activeRegionProfile.isBuiltIn) {
+                            IconButton(
+                                onClick = {
+                                    editingProfile = activeRegionProfile
+                                    showEditPanel = true
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Edit profile",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = { showEditPanel = !showEditPanel },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (showEditPanel) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = if (showEditPanel) "Collapse" else "Expand",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (showEditPanel) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    RegionProfileDetailPanel(
+                        profile = activeRegionProfile,
+                        editable = !activeRegionProfile.isBuiltIn,
+                        onSave = onSaveProfile
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Button to create a new custom profile
+            OutlinedButton(
+                onClick = {
+                    editingProfile = RegionProfile(
+                        regionName = "",
+                        isBuiltIn = false
+                    )
+                    showEditPanel = true
+                },
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().testTag("add_region_profile_button")
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Add Custom Region", fontSize = 12.sp)
+            }
+        }
+    }
+
+    // Dialog for editing / creating a custom profile
+    val ep = editingProfile
+    if (ep != null && showEditPanel && (ep.id == 0 || !ep.isBuiltIn)) {
+        RegionProfileEditDialog(
+            profile = ep,
+            onDismiss = {
+                editingProfile = null
+                showEditPanel = false
+            },
+            onConfirm = { saved ->
+                onSaveProfile(saved)
+                editingProfile = null
+                showEditPanel = false
+            }
+        )
+    }
+}
+
+/**
+ * Inline read-only (or editable) detail panel showing the 5 price brackets
+ * and the 4 default cost fields of a RegionProfile.
+ */
+@Composable
+fun RegionProfileDetailPanel(
+    profile: RegionProfile,
+    editable: Boolean,
+    onSave: (RegionProfile) -> Unit
+) {
+    var draft by remember(profile.id) { mutableStateOf(profile) }
+
+    val brackets = listOf(
+        "20g" to draft.priceAt20g,
+        "25g" to draft.priceAt25g,
+        "30g" to draft.priceAt30g,
+        "35g" to draft.priceAt35g,
+        "40g" to draft.priceAt40g
+    )
+
+    Card(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text("Price per kg (${draft.currency})", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                brackets.forEach { (label, price) ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(label, fontSize = 10.sp, color = AquaticColors.SoftMutedText)
+                        Text(
+                            String.format("%.1f", price),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text("Default Input Costs (${draft.currency}/day or /kg)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            listOf(
+                "Feed ($/kg)" to String.format("%.2f", draft.feedCostDefault),
+                "Labor ($/day)" to String.format("%.2f", draft.laborCostDefault),
+                "Aeration ($/day)" to String.format("%.2f", draft.aerationCostDefault),
+                "Probiotic ($/day)" to String.format("%.2f", draft.probioticCostDefault)
+            ).forEach { (label, value) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(label, fontSize = 11.sp, color = AquaticColors.SoftMutedText)
+                    Text(value, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            if (profile.isBuiltIn) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "Built-in region — read only. Create a custom region to edit.",
+                    fontSize = 10.sp,
+                    color = AquaticColors.SoftMutedText
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Dialog for creating or editing a custom RegionProfile.
+ */
+@Composable
+fun RegionProfileEditDialog(
+    profile: RegionProfile,
+    onDismiss: () -> Unit,
+    onConfirm: (RegionProfile) -> Unit
+) {
+    var name by remember { mutableStateOf(profile.regionName) }
+    var currency by remember { mutableStateOf(profile.currency) }
+    var p20 by remember { mutableStateOf(profile.priceAt20g.toString()) }
+    var p25 by remember { mutableStateOf(profile.priceAt25g.toString()) }
+    var p30 by remember { mutableStateOf(profile.priceAt30g.toString()) }
+    var p35 by remember { mutableStateOf(profile.priceAt35g.toString()) }
+    var p40 by remember { mutableStateOf(profile.priceAt40g.toString()) }
+    var feed by remember { mutableStateOf(profile.feedCostDefault.toString()) }
+    var labor by remember { mutableStateOf(profile.laborCostDefault.toString()) }
+    var aeration by remember { mutableStateOf(profile.aerationCostDefault.toString()) }
+    var probiotic by remember { mutableStateOf(profile.probioticCostDefault.toString()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                if (profile.id == 0) "New Region Profile" else "Edit Region Profile",
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Region Name", fontSize = 11.sp) },
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = currency,
+                    onValueChange = { currency = it },
+                    label = { Text("Currency Code (e.g. USD)", fontSize = 11.sp) },
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text("Price per kg by size", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = p20,
+                        onValueChange = { p20 = it },
+                        label = { Text("@20g", fontSize = 11.sp) },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = p25,
+                        onValueChange = { p25 = it },
+                        label = { Text("@25g", fontSize = 11.sp) },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = p30,
+                        onValueChange = { p30 = it },
+                        label = { Text("@30g", fontSize = 11.sp) },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = p35,
+                        onValueChange = { p35 = it },
+                        label = { Text("@35g", fontSize = 11.sp) },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = p40,
+                        onValueChange = { p40 = it },
+                        label = { Text("@40g", fontSize = 11.sp) },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Text("Default Input Costs", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = feed,
+                        onValueChange = { feed = it },
+                        label = { Text("Feed $/kg", fontSize = 11.sp) },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = labor,
+                        onValueChange = { labor = it },
+                        label = { Text("Labor $/day", fontSize = 11.sp) },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = aeration,
+                        onValueChange = { aeration = it },
+                        label = { Text("Aeration $/day", fontSize = 11.sp) },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = probiotic,
+                        onValueChange = { probiotic = it },
+                        label = { Text("Probiotic $/day", fontSize = 11.sp) },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.isNotBlank()) {
+                        onConfirm(
+                            profile.copy(
+                                regionName = name.trim(),
+                                currency = currency.trim().ifBlank { "USD" },
+                                priceAt20g = p20.toDoubleOrNull() ?: profile.priceAt20g,
+                                priceAt25g = p25.toDoubleOrNull() ?: profile.priceAt25g,
+                                priceAt30g = p30.toDoubleOrNull() ?: profile.priceAt30g,
+                                priceAt35g = p35.toDoubleOrNull() ?: profile.priceAt35g,
+                                priceAt40g = p40.toDoubleOrNull() ?: profile.priceAt40g,
+                                feedCostDefault = feed.toDoubleOrNull() ?: profile.feedCostDefault,
+                                laborCostDefault = labor.toDoubleOrNull() ?: profile.laborCostDefault,
+                                aerationCostDefault = aeration.toDoubleOrNull() ?: profile.aerationCostDefault,
+                                probioticCostDefault = probiotic.toDoubleOrNull() ?: profile.probioticCostDefault
+                            )
+                        )
+                    }
+                },
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 /**
