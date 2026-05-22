@@ -1,5 +1,6 @@
 package com.shrimpadvisor.plcycle.ui
 
+import com.shrimpadvisor.plcycle.data.RegionProfile
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -322,12 +323,54 @@ object AdvisorEngine {
         val bestHoldScenario: HoldScenario?,
         val shouldHarvestNow: Boolean,
         val profitDifferential: Double,
-        val holdScenariosList: List<HoldScenario>
+        val holdScenariosList: List<HoldScenario>,
+        val mortalityRatePerDay: Double = 0.004,
+        val mortalityAcceleration: Double = 0.0,
+        val scenarioResult: HarvestOptimizerResult? = null
     )
 
-    fun getPricePerKg(weightIng: Double): Double {
+    /**
+     * Returns price per kg for a given shrimp weight.
+     *
+     * When a [RegionProfile] is supplied, linearly interpolates between the five
+     * size brackets (20 g, 25 g, 30 g, 35 g, 40 g).  Values below 20 g are
+     * extrapolated using the 20–25 g slope; values above 40 g are extrapolated
+     * using the 35–40 g slope.
+     *
+     * When no profile is provided the legacy formula is used as a fallback.
+     */
+    fun getPricePerKg(weightIng: Double, regionProfile: RegionProfile? = null): Double {
         val wt = max(2.0, weightIng)
-        return 4.0 + (wt * 0.25)
+
+        if (regionProfile == null) {
+            // Legacy fallback
+            return 4.0 + (wt * 0.25)
+        }
+
+        // Bracket definitions: (weight_g, price_per_kg)
+        val brackets = listOf(
+            20.0 to regionProfile.priceAt20g,
+            25.0 to regionProfile.priceAt25g,
+            30.0 to regionProfile.priceAt30g,
+            35.0 to regionProfile.priceAt35g,
+            40.0 to regionProfile.priceAt40g
+        )
+
+        // Find enclosing bracket pair and interpolate
+        for (i in 0 until brackets.size - 1) {
+            val (w0, p0) = brackets[i]
+            val (w1, p1) = brackets[i + 1]
+            if (wt <= w1) {
+                val t = if (w1 == w0) 0.0 else (wt - w0) / (w1 - w0)
+                return p0 + t * (p1 - p0)
+            }
+        }
+
+        // Extrapolate above 40 g using the last two brackets
+        val (w0, p0) = brackets[brackets.size - 2]
+        val (w1, p1) = brackets[brackets.size - 1]
+        val slope = (p1 - p0) / (w1 - w0)
+        return p1 + slope * (wt - w1)
     }
 
     fun optimizeHarvest(
@@ -340,57 +383,74 @@ object AdvisorEngine {
         feedCostPerKg: Double,
         aerationCost: Double,
         probioticCost: Double,
-        laborCost: Double
+        laborCost: Double,
+        mortalityRatePerDay: Double = 0.004,
+        mortalityAcceleration: Double = 0.0,
+        regionProfile: RegionProfile? = null
     ): HarvestOptimizerResult {
         val initialStockingQty = proposedDensity * pondSize
         val currentShrimpQty = initialStockingQty * (estimatedSurvival / 100.0)
-        
+
         val currentBiomass = max(1.0, currentShrimpQty * (currentAbw / 1000.0))
-        val currentPrice = getPricePerKg(currentAbw)
+        val currentPrice = getPricePerKg(currentAbw, regionProfile)
         val currentRevenue = currentBiomass * currentPrice
 
-        val scenariosList = mutableListOf<HoldScenario>()
-        
-        for (day in 1..30) {
-            val projectedQty = currentShrimpQty * (1.0 - 0.004).pow(day.toDouble())
-            val projectedWeight = currentAbw + adg * day
-            val projectedBiomass = projectedQty * (projectedWeight / 1000.0)
-            val projectedPrice = getPricePerKg(projectedWeight)
-            val projectedRevenue = projectedBiomass * projectedPrice
+        fun runSimulation(baseRate: Double, acceleration: Double): HarvestOptimizerResult {
+            val scenariosList = mutableListOf<HoldScenario>()
 
-            val expectedDailyFeedNeeded = projectedBiomass * 0.025
-            val dailyFeedCost = expectedDailyFeedNeeded * feedCostPerKg
-            
-            val totalDailyAddedCost = aerationCost + probioticCost + laborCost + dailyFeedCost
-            val totalAddedCost = totalDailyAddedCost * day
-            
-            val netAddedGain = projectedRevenue - currentRevenue - totalAddedCost
-            
-            scenariosList.add(
-                HoldScenario(
-                    day = day,
-                    projectedWeight = projectedWeight,
-                    projectedBiomass = projectedBiomass,
-                    projectedPricePerKg = projectedPrice,
-                    totalAddedCost = totalAddedCost,
-                    netAddedGain = netAddedGain
+            for (day in 1..30) {
+                val survivorFraction = (1..day).fold(1.0) { acc, d ->
+                    acc * (1.0 - (baseRate + acceleration * (d / 7.0)))
+                }
+                val projectedQty = currentShrimpQty * survivorFraction
+                val projectedWeight = currentAbw + adg * day
+                val projectedBiomass = projectedQty * (projectedWeight / 1000.0)
+                val projectedPrice = getPricePerKg(projectedWeight, regionProfile)
+                val projectedRevenue = projectedBiomass * projectedPrice
+
+                val expectedDailyFeedNeeded = projectedBiomass * 0.025
+                val dailyFeedCost = expectedDailyFeedNeeded * feedCostPerKg
+
+                val totalDailyAddedCost = aerationCost + probioticCost + laborCost + dailyFeedCost
+                val totalAddedCost = totalDailyAddedCost * day
+
+                val netAddedGain = projectedRevenue - currentRevenue - totalAddedCost
+
+                scenariosList.add(
+                    HoldScenario(
+                        day = day,
+                        projectedWeight = projectedWeight,
+                        projectedBiomass = projectedBiomass,
+                        projectedPricePerKg = projectedPrice,
+                        totalAddedCost = totalAddedCost,
+                        netAddedGain = netAddedGain
+                    )
                 )
+            }
+
+            val bestScenario = scenariosList.maxByOrNull { it.netAddedGain }
+            val shouldHarvestNow = (bestScenario == null || bestScenario.netAddedGain <= 0.0)
+            val profitDifferential = if (shouldHarvestNow) 0.0 else (bestScenario?.netAddedGain ?: 0.0)
+
+            return HarvestOptimizerResult(
+                currentWeight = currentAbw,
+                currentBiomass = currentBiomass,
+                currentPricePerKg = currentPrice,
+                currentRevenue = currentRevenue,
+                bestHoldScenario = bestScenario,
+                shouldHarvestNow = shouldHarvestNow,
+                profitDifferential = profitDifferential,
+                holdScenariosList = scenariosList,
+                mortalityRatePerDay = baseRate,
+                mortalityAcceleration = acceleration,
+                scenarioResult = null
             )
         }
-        
-        val bestScenario = scenariosList.maxByOrNull { it.netAddedGain }
-        val shouldHarvestNow = (bestScenario == null || bestScenario.netAddedGain <= 0.0)
-        val profitDifferential = if (shouldHarvestNow) 0.0 else (bestScenario?.netAddedGain ?: 0.0)
 
-        return HarvestOptimizerResult(
-            currentWeight = currentAbw,
-            currentBiomass = currentBiomass,
-            currentPricePerKg = currentPrice,
-            currentRevenue = currentRevenue,
-            bestHoldScenario = bestScenario,
-            shouldHarvestNow = shouldHarvestNow,
-            profitDifferential = profitDifferential,
-            holdScenariosList = scenariosList
-        )
+        val normalResult = runSimulation(mortalityRatePerDay, mortalityAcceleration)
+        val diseaseScenarioRate = mortalityRatePerDay * 2.5
+        val diseaseResult = runSimulation(diseaseScenarioRate, mortalityAcceleration)
+
+        return normalResult.copy(scenarioResult = diseaseResult)
     }
 }

@@ -9,6 +9,7 @@ import com.shrimpadvisor.plcycle.BuildConfig
 import com.shrimpadvisor.plcycle.data.DailyReading
 import com.shrimpadvisor.plcycle.data.PondCycle
 import com.shrimpadvisor.plcycle.data.PondCycleRepository
+import com.shrimpadvisor.plcycle.data.RegionProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -62,6 +63,25 @@ class PondCycleViewModel(
 
     private val _isAiLoading = MutableStateFlow(false)
     val isAiLoading: StateFlow<Boolean> = _isAiLoading.asStateFlow()
+
+    // Region profiles
+    val allRegionProfiles: StateFlow<List<RegionProfile>> = repository.allRegionProfiles
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    /**
+     * The RegionProfile linked to the active cycle (null when no profile is selected).
+     * Derived by matching activeCycle.regionProfileId against allRegionProfiles.
+     */
+    val activeRegionProfile: StateFlow<RegionProfile?> = combine(
+        activeCycle, allRegionProfiles
+    ) { cycle, profiles ->
+        val profileId = cycle?.regionProfileId ?: return@combine null
+        profiles.firstOrNull { it.id == profileId }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     fun selectCycle(cycle: PondCycle) {
         _activeCycle.value = cycle
@@ -128,6 +148,33 @@ class PondCycleViewModel(
         }
     }
 
+    fun saveRegionProfile(profile: RegionProfile) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (profile.id == 0) {
+                repository.insertRegionProfile(profile)
+            } else {
+                repository.updateRegionProfile(profile)
+            }
+        }
+    }
+
+    fun deleteRegionProfile(profile: RegionProfile) {
+        if (profile.isBuiltIn) return
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteRegionProfile(profile)
+            // Clear the link on active cycle if it pointed to this profile
+            _activeCycle.update { cycle ->
+                if (cycle?.regionProfileId == profile.id) {
+                    val updated = cycle.copy(regionProfileId = null)
+                    viewModelScope.launch(Dispatchers.IO) { repository.update(updated) }
+                    updated
+                } else {
+                    cycle
+                }
+            }
+        }
+    }
+
     fun logDailyReading() {
         val cycle = _activeCycle.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
@@ -152,7 +199,10 @@ class PondCycleViewModel(
         _chatMessages.update { it + userMsg }
         _isAiLoading.value = true
         viewModelScope.launch {
-            val reply = GeminiAdvisor.ask(BuildConfig.GEMINI_API_KEY, cycle, question)
+            val last14Readings = activeReadings.value
+                .sortedBy { it.pondAge }
+                .takeLast(14)
+            val reply = GeminiAdvisor.ask(BuildConfig.GEMINI_API_KEY, cycle, question, last14Readings)
             _chatMessages.update { it + ChatMessage(text = reply, isUser = false) }
             _isAiLoading.value = false
         }
@@ -200,7 +250,7 @@ class PondCycleViewModel(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    val costResult = activeCycle.map { cycle ->
+    val costResult = combine(activeCycle, activeRegionProfile) { cycle, profile ->
         cycle?.let {
             AdvisorEngine.evaluateCosts(
                 pondSize = it.pondSize,
@@ -210,15 +260,15 @@ class PondCycleViewModel(
                 age = it.currentAge,
                 totalFeed = it.totalFeedConsumed,
                 plUnitCost = it.plUnitCost,
-                feedCostPerKg = it.feedCostPerKg,
-                aerationCost = it.aerationCostPerDay,
-                probioticCost = it.probioticCostPerDay,
-                laborCost = it.laborCostPerDay
+                feedCostPerKg = profile?.feedCostDefault ?: it.feedCostPerKg,
+                aerationCost = profile?.aerationCostDefault ?: it.aerationCostPerDay,
+                probioticCost = profile?.probioticCostDefault ?: it.probioticCostPerDay,
+                laborCost = profile?.laborCostDefault ?: it.laborCostPerDay
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    val harvestResult = activeCycle.map { cycle ->
+    val harvestResult = combine(activeCycle, activeRegionProfile) { cycle, profile ->
         cycle?.let {
             AdvisorEngine.optimizeHarvest(
                 pondSize = it.pondSize,
@@ -227,10 +277,13 @@ class PondCycleViewModel(
                 currentAbw = it.currentAbw,
                 totalFeed = it.totalFeedConsumed,
                 adg = it.averageDailyGain,
-                feedCostPerKg = it.feedCostPerKg,
-                aerationCost = it.aerationCostPerDay,
-                probioticCost = it.probioticCostPerDay,
-                laborCost = it.laborCostPerDay
+                feedCostPerKg = profile?.feedCostDefault ?: it.feedCostPerKg,
+                aerationCost = profile?.aerationCostDefault ?: it.aerationCostPerDay,
+                probioticCost = profile?.probioticCostDefault ?: it.probioticCostPerDay,
+                laborCost = profile?.laborCostDefault ?: it.laborCostPerDay,
+                mortalityRatePerDay = it.customMortalityRate,
+                mortalityAcceleration = it.mortalityAcceleration,
+                regionProfile = profile
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)

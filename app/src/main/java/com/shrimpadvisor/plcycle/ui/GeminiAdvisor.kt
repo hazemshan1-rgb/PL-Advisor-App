@@ -1,5 +1,6 @@
 package com.shrimpadvisor.plcycle.ui
 
+import com.shrimpadvisor.plcycle.data.DailyReading
 import com.shrimpadvisor.plcycle.data.PondCycle
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -42,7 +43,11 @@ object GeminiAdvisor {
     private val requestAdapter = moshi.adapter(GeminiRequest::class.java)
     private val responseAdapter = moshi.adapter(GeminiResponse::class.java)
 
-    internal fun buildPrompt(cycle: PondCycle, question: String) = buildString {
+    internal fun buildPrompt(
+        cycle: PondCycle,
+        question: String,
+        recentReadings: List<DailyReading> = emptyList()
+    ) = buildString {
         appendLine("You are an expert shrimp aquaculture advisor specializing in intensive L. vannamei (whiteleg shrimp) biofloc farming.")
         appendLine("Provide concise, actionable advice — 3 to 5 sentences unless a detailed protocol is explicitly requested.")
         appendLine()
@@ -53,11 +58,131 @@ object GeminiAdvisor {
         appendLine("Survival: ${cycle.estimatedSurvival}%  |  ABW: ${cycle.currentAbw} g  |  ADG: ${cycle.averageDailyGain} g/day")
         appendLine("Feed consumed: ${cycle.totalFeedConsumed} kg  |  Feed cost: ${cycle.feedCostPerKg} USD/kg")
         appendLine("PL quality scores — stress: ${cycle.stressToleranceScore}%  gut: ${cycle.gutFullnessScore}%  supplier: ${cycle.supplierScore}%")
+
+        if (recentReadings.isNotEmpty()) {
+            val sorted = recentReadings.sortedBy { it.pondAge }.takeLast(14)
+            appendLine()
+            appendLine("=== Last ${sorted.size} Daily Readings ===")
+            appendLine("Day | DO  | TAN  | pH   | Temp | ABW  | Surv%")
+            appendLine("----|-----|------|------|------|------|------")
+            for (r in sorted) {
+                appendLine(
+                    String.format(
+                        "%3d | %3.1f | %4.2f | %4.2f | %4.1f | %4.1f | %5.1f",
+                        r.pondAge, r.doLevel, r.tanLevel, r.ph, r.temp, r.abw, r.survivalPct
+                    )
+                )
+            }
+
+            // 7-day trend analysis: compare first-half avg vs second-half avg
+            appendLine()
+            appendLine("=== 7-Day Trends ===")
+
+            val trendReadings = sorted.takeLast(14)
+            if (trendReadings.size >= 2) {
+                val mid = trendReadings.size / 2
+                val firstHalf = trendReadings.take(mid)
+                val secondHalf = trendReadings.drop(mid)
+
+                fun trendLabel(firstAvg: Double, secondAvg: Double, range: Double): String {
+                    val delta = secondAvg - firstAvg
+                    val threshold = range * 0.05
+                    return when {
+                        delta > threshold -> "rising"
+                        delta < -threshold -> "falling"
+                        else -> "stable"
+                    }
+                }
+
+                fun avg(values: List<Double>) = if (values.isEmpty()) 0.0 else values.sum() / values.size
+
+                // DO
+                val doFirst = avg(firstHalf.map { it.doLevel })
+                val doSecond = avg(secondHalf.map { it.doLevel })
+                val doAll = trendReadings.map { it.doLevel }
+                val doRange = (doAll.maxOrNull() ?: 0.0) - (doAll.minOrNull() ?: 0.0)
+                val doAvg = avg(doAll)
+                val doLast = trendReadings.last().doLevel
+                val doDelta = doLast - doFirst
+                appendLine(
+                    String.format(
+                        "DO: %s (avg %.1f, last %.1f, Δ %+.1f)",
+                        trendLabel(doFirst, doSecond, doRange), doAvg, doLast, doDelta
+                    )
+                )
+
+                // TAN
+                val tanFirst = avg(firstHalf.map { it.tanLevel })
+                val tanSecond = avg(secondHalf.map { it.tanLevel })
+                val tanAll = trendReadings.map { it.tanLevel }
+                val tanRange = (tanAll.maxOrNull() ?: 0.0) - (tanAll.minOrNull() ?: 0.0)
+                val tanAvg = avg(tanAll)
+                val tanLast = trendReadings.last().tanLevel
+                val tanDelta = tanLast - tanFirst
+                appendLine(
+                    String.format(
+                        "TAN: %s (avg %.2f, last %.2f, Δ %+.2f)",
+                        trendLabel(tanFirst, tanSecond, tanRange), tanAvg, tanLast, tanDelta
+                    )
+                )
+
+                // pH
+                val phFirst = avg(firstHalf.map { it.ph })
+                val phSecond = avg(secondHalf.map { it.ph })
+                val phAll = trendReadings.map { it.ph }
+                val phRange = (phAll.maxOrNull() ?: 0.0) - (phAll.minOrNull() ?: 0.0)
+                val phAvg = avg(phAll)
+                val phLast = trendReadings.last().ph
+                val phDelta = phLast - phFirst
+                appendLine(
+                    String.format(
+                        "pH: %s (avg %.2f, last %.2f, Δ %+.2f)",
+                        trendLabel(phFirst, phSecond, phRange), phAvg, phLast, phDelta
+                    )
+                )
+
+                // Survival
+                val survFirst = avg(firstHalf.map { it.survivalPct })
+                val survSecond = avg(secondHalf.map { it.survivalPct })
+                val survAll = trendReadings.map { it.survivalPct }
+                val survRange = (survAll.maxOrNull() ?: 0.0) - (survAll.minOrNull() ?: 0.0)
+                val survAvg = avg(survAll)
+                val survLast = trendReadings.last().survivalPct
+                val survDelta = survLast - survFirst
+                appendLine(
+                    String.format(
+                        "Survival: %s (avg %.1f%%, last %.1f%%, Δ %+.1f%%)",
+                        trendLabel(survFirst, survSecond, survRange), survAvg, survLast, survDelta
+                    )
+                )
+
+                // ABW
+                val abwFirst = avg(firstHalf.map { it.abw })
+                val abwSecond = avg(secondHalf.map { it.abw })
+                val abwAll = trendReadings.map { it.abw }
+                val abwRange = (abwAll.maxOrNull() ?: 0.0) - (abwAll.minOrNull() ?: 0.0)
+                val abwAvg = avg(abwAll)
+                val abwLast = trendReadings.last().abw
+                val abwDelta = abwLast - abwFirst
+                appendLine(
+                    String.format(
+                        "ABW: %s (avg %.1fg, last %.1fg, Δ %+.1fg)",
+                        trendLabel(abwFirst, abwSecond, abwRange), abwAvg, abwLast, abwDelta
+                    )
+                )
+            }
+        }
+
         appendLine()
         appendLine("Farmer's question: $question")
     }
 
-    suspend fun ask(apiKey: String, cycle: PondCycle, question: String): String =
+    suspend fun ask(
+        apiKey: String,
+        cycle: PondCycle,
+        question: String,
+        recentReadings: List<DailyReading> = emptyList()
+    ): String =
         withContext(Dispatchers.IO) {
             if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
                 return@withContext "⚠️ No API key configured. Add your GEMINI_API_KEY to the .env file and rebuild the app."
@@ -66,7 +191,7 @@ object GeminiAdvisor {
             try {
                 val body = GeminiRequest(
                     contents = listOf(
-                        GeminiContent(parts = listOf(GeminiPart(buildPrompt(cycle, question))))
+                        GeminiContent(parts = listOf(GeminiPart(buildPrompt(cycle, question, recentReadings))))
                     )
                 )
                 val json = requestAdapter.toJson(body)
