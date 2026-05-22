@@ -50,7 +50,7 @@ private val LightColorScheme = lightColorScheme(
 )
 
 @Composable
-fun MyApplicationTheme(
+fun ShrimpPLAdvisorTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     // Disable dynamic colors to enforce our custom high-fidelity aquatic brand theme
     dynamicColor: Boolean = false,

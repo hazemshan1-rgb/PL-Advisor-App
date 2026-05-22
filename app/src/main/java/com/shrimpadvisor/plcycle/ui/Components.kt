@@ -426,3 +426,116 @@ fun ProfitScenarioBarChart(
         }
     }
 }
+
+/**
+ * 4. Water Quality Trend Chart
+ * Plots DO, pH, and TAN across logged daily readings.
+ * Each metric is normalised to its own safe operating range (0–1) so all three
+ * lines fit the same canvas height without distortion.
+ *
+ * Colour coding:
+ *   DO  → Electric Teal
+ *   pH  → Sand Gold
+ *   TAN → Alarm Red
+ */
+@Composable
+fun WaterQualityTrendChart(
+    readings: List<DailyReading>,
+    modifier: Modifier = Modifier
+) {
+    if (readings.isEmpty()) return
+
+    val sorted = readings.sortedBy { it.pondAge }
+
+    // Safe-range normalisation bounds for each metric.
+    // Values outside range clamp to 0 or 1 — intentional; they'll visually breach the safe zone.
+    val doMin = 0.0; val doMax = 10.0
+    val phMin = 6.0; val phMax = 9.5
+    val tanMin = 0.0; val tanMax = 1.0
+
+    fun norm(value: Double, min: Double, max: Double): Float =
+        ((value - min) / (max - min)).coerceIn(0.0, 1.0).toFloat()
+
+    val days = sorted.map { it.pondAge.toFloat() }
+    val minDay = days.first()
+    val maxDay = days.last().coerceAtLeast(minDay + 1f)
+
+    // Pre-compute normalised value lists outside the draw scope (data class not allowed inside DrawScope lambda)
+    val doValues = sorted.map { norm(it.doLevel, doMin, doMax) }
+    val phValues = sorted.map { norm(it.ph, phMin, phMax) }
+    val tanValues = sorted.map { norm(it.tanLevel, tanMin, tanMax) }
+    val metricLines = listOf(
+        Pair(doValues, AquaticColors.ElectricTeal),
+        Pair(phValues, AquaticColors.SandGold),
+        Pair(tanValues, AquaticColors.AlarmRed)
+    )
+
+    Column(modifier = modifier) {
+        Text(
+            text = "Water Quality Trends",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp)
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
+                .padding(12.dp)
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+
+                // Horizontal grid lines
+                repeat(5) { i ->
+                    val y = h * i / 4f
+                    drawLine(AquaticColors.GridLineColor, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+                }
+
+                fun xPos(day: Float) = (day - minDay) / (maxDay - minDay) * w
+                fun yPos(n: Float) = h - n * h
+
+                metricLines.forEach { (values, color) ->
+                    val path = Path().apply {
+                        moveTo(xPos(days.first()), yPos(values.first()))
+                        days.drop(1).forEachIndexed { idx, day ->
+                            lineTo(xPos(day), yPos(values[idx + 1]))
+                        }
+                    }
+                    drawPath(path, color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+                    days.forEachIndexed { idx, day ->
+                        drawCircle(color, radius = 3.5.dp.toPx(), center = Offset(xPos(day), yPos(values[idx])))
+                    }
+                }
+            }
+        }
+
+        // Legend
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            listOf(
+                Triple("DO", AquaticColors.ElectricTeal, "mg/L"),
+                Triple("pH", AquaticColors.SandGold, "6–9.5"),
+                Triple("TAN", AquaticColors.AlarmRed, "mg/L")
+            ).forEach { (label, color, unit) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(color, RoundedCornerShape(4.dp))
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("$label ($unit)", fontSize = 10.sp, color = AquaticColors.SoftMutedText)
+                }
+            }
+        }
+    }
+}

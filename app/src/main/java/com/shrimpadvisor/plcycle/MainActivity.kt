@@ -14,7 +14,7 @@ import com.shrimpadvisor.plcycle.data.PondCycleRepository
 import com.shrimpadvisor.plcycle.ui.PondCycleViewModel
 import com.shrimpadvisor.plcycle.ui.PondCycleViewModelFactory
 import com.shrimpadvisor.plcycle.ui.ShrimpAppMainContainer
-import com.shrimpadvisor.plcycle.ui.theme.MyApplicationTheme
+import com.shrimpadvisor.plcycle.ui.theme.ShrimpPLAdvisorTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -30,7 +30,7 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            MyApplicationTheme {
+            ShrimpPLAdvisorTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

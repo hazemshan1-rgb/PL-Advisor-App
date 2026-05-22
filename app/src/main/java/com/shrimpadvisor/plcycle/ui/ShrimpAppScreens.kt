@@ -352,7 +352,8 @@ fun ShrimpAppMainContainer(
                                 stocking = stocking,
                                 survival = survival,
                                 cost = cost,
-                                harvest = harvest
+                                harvest = harvest,
+                                dailyReadings = activeReadings
                             )
                         }
                     }
@@ -697,6 +698,76 @@ fun DashboardOverviewTab(
                 scoreText = harvest?.bestHoldScenario?.let { "Hold ${it.day}d" } ?: "Now",
                 icon = Icons.Default.TrendingUp,
                 onClick = { onNavigateToTab(5) }
+            )
+        }
+
+        item {
+            FeedingReminderCard(pondName = cycle.pondName)
+        }
+    }
+}
+
+@Composable
+fun FeedingReminderCard(pondName: String) {
+    val context = LocalContext.current
+    var remindersEnabled by remember { mutableStateOf(false) }
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(AquaticColors.ElectricTeal.copy(alpha = 0.1f), RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Notifications,
+                    contentDescription = null,
+                    tint = AquaticColors.ElectricTeal,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Feeding Reminders", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    if (remindersEnabled) "Twice-daily reminders active (06:00 & 18:00)"
+                    else "Enable to get morning & evening feeding alerts",
+                    fontSize = 11.sp,
+                    color = AquaticColors.SoftMutedText
+                )
+            }
+            Switch(
+                checked = remindersEnabled,
+                onCheckedChange = { enabled ->
+                    remindersEnabled = enabled
+                    val workManager = androidx.work.WorkManager.getInstance(context)
+                    if (enabled) {
+                        val data = androidx.work.Data.Builder()
+                            .putString(com.shrimpadvisor.plcycle.FeedingReminderWorker.KEY_POND_NAME, pondName)
+                            .build()
+                        val morningRequest = androidx.work.PeriodicWorkRequestBuilder<com.shrimpadvisor.plcycle.FeedingReminderWorker>(
+                            12, java.util.concurrent.TimeUnit.HOURS
+                        ).setInputData(data)
+                            .addTag(com.shrimpadvisor.plcycle.FeedingReminderWorker.WORK_TAG)
+                            .build()
+                        workManager.enqueueUniquePeriodicWork(
+                            com.shrimpadvisor.plcycle.FeedingReminderWorker.WORK_TAG,
+                            androidx.work.ExistingPeriodicWorkPolicy.REPLACE,
+                            morningRequest
+                        )
+                    } else {
+                        workManager.cancelAllWorkByTag(com.shrimpadvisor.plcycle.FeedingReminderWorker.WORK_TAG)
+                    }
+                }
             )
         }
     }
@@ -1214,6 +1285,12 @@ fun SurvivalMonitorTab(
             )
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            // Water quality trend chart — only rendered when ≥2 readings are available
+            if (dailyReadings.size >= 2) {
+                WaterQualityTrendChart(readings = dailyReadings)
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
             // Diagnostic outputs
             val titleColor = when (result.status) {
@@ -2260,7 +2337,8 @@ fun ReportSummaryTab(
     stocking: AdvisorEngine.StockingResult?,
     survival: AdvisorEngine.SurvivalTrajectoryResult?,
     cost: AdvisorEngine.CostTrackingResult?,
-    harvest: AdvisorEngine.HarvestOptimizerResult?
+    harvest: AdvisorEngine.HarvestOptimizerResult?,
+    dailyReadings: List<DailyReading> = emptyList()
 ) {
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
@@ -2378,6 +2456,116 @@ Projected profitability uplift: ${harvest?.profitDifferential?.let { String.form
                         Icon(Icons.Default.Share, contentDescription = "Share", modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Share", fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                if (dailyReadings.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            val pdfDoc = android.graphics.pdf.PdfDocument()
+                            val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(595, 842, 1).create()
+                            val page = pdfDoc.startPage(pageInfo)
+                            val canvas = page.canvas
+                            val paint = android.graphics.Paint().apply { isAntiAlias = true }
+                            var y = 60f
+
+                            fun drawLine(text: String, size: Float = 12f, bold: Boolean = false) {
+                                paint.textSize = size
+                                paint.typeface = if (bold) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+                                canvas.drawText(text, 40f, y, paint)
+                                y += size + 6f
+                            }
+
+                            drawLine("SHRIMP PL CYCLE ADVISOR — FULL REPORT", 16f, true)
+                            drawLine("Pond: ${cycle.pondName}  |  Area: ${cycle.pondSize} m²  |  Age: ${cycle.currentAge} days", 11f)
+                            drawLine("Generated: ${java.text.DateFormat.getDateInstance().format(java.util.Date())}", 10f)
+                            y += 8f
+                            drawLine("─────────────────────────────────────────────────", 10f)
+                            y += 4f
+                            drawLine("PL Quality: ${plResult?.statusMessage ?: "N/A"}  (${plResult?.score?.let { String.format("%.1f%%", it) } ?: "--"})", 11f)
+                            drawLine("Stocking Density: ${cycle.proposedDensity} PL/m²  |  Capacity exceeded: ${stocking?.carryingCapacityExceeded ?: false}", 11f)
+                            drawLine("Survival: ${cycle.estimatedSurvival}%  |  Expected: ${survival?.expectedSurvival?.let { String.format("%.1f%%", it) } ?: "--"}", 11f)
+                            drawLine("FCR: ${cost?.fcr?.let { String.format("%.2f", it) } ?: "--"}  |  Total cost: ${cost?.totalAccumulatedCost?.let { String.format("$%,.2f", it) } ?: "--"}", 11f)
+                            drawLine("Harvest: ${if (harvest?.shouldHarvestNow == true) "HARVEST NOW" else "HOLD"}  |  Uplift: ${harvest?.profitDifferential?.let { String.format("$%,.2f", it) } ?: "--"}", 11f)
+
+                            if (dailyReadings.isNotEmpty()) {
+                                y += 8f
+                                drawLine("─────────────────────────────────────────────────", 10f)
+                                drawLine("DAILY READINGS", 12f, true)
+                                drawLine("Day  Survival%  DO    TAN   pH    Temp  ABW", 9f, true)
+                                dailyReadings.sortedBy { it.pondAge }.forEach { r ->
+                                    if (y < 800f) {
+                                        drawLine(
+                                            String.format(
+                                                "%-4d %-9.1f  %-5.2f %-5.2f %-5.1f %-5.1f %-5.1f",
+                                                r.pondAge, r.survivalPct, r.doLevel, r.tanLevel, r.ph, r.temp, r.abw
+                                            ), 9f
+                                        )
+                                    }
+                                }
+                            }
+
+                            pdfDoc.finishPage(page)
+                            val pdfFileName = "${cycle.pondName.replace(" ", "_")}_report.pdf"
+                            val pdfFile = java.io.File(context.cacheDir, pdfFileName)
+                            pdfFile.outputStream().use { pdfDoc.writeTo(it) }
+                            pdfDoc.close()
+                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                context, "${context.packageName}.fileprovider", pdfFile
+                            )
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/pdf"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                putExtra(Intent.EXTRA_SUBJECT, "Shrimp Report — ${cycle.pondName}")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(intent, "Export PDF"))
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("export_pdf_button"),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.PictureAsPdf, contentDescription = "Export PDF", modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Export Full Report (PDF)", fontWeight = FontWeight.Bold)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            val csv = buildString {
+                                appendLine("Day,Survival %,DO (mg/L),TAN (mg/L),pH,Temp (°C),ABW (g),Notes")
+                                dailyReadings.sortedBy { it.pondAge }.forEach { r ->
+                                    val notes = r.notes.replace(",", ";").replace("\n", " ")
+                                    appendLine("${r.pondAge},${r.survivalPct},${r.doLevel},${r.tanLevel},${r.ph},${r.temp},${r.abw},$notes")
+                                }
+                            }
+                            val fileName = "${cycle.pondName.replace(" ", "_")}_readings.csv"
+                            val file = java.io.File(context.cacheDir, fileName)
+                            file.writeText(csv)
+                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.fileprovider",
+                                file
+                            )
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/csv"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                putExtra(Intent.EXTRA_SUBJECT, "Daily Readings — ${cycle.pondName}")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(intent, "Export CSV"))
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("export_csv_button"),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = "Export CSV", modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Export Daily Readings (CSV)", fontWeight = FontWeight.Bold)
                     }
                 }
 
