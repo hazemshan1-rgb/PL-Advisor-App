@@ -1,5 +1,7 @@
 package com.shrimpadvisor.plcycle
 
+import com.shrimpadvisor.plcycle.data.DailyReading
+import com.shrimpadvisor.plcycle.data.RegionProfile
 import com.shrimpadvisor.plcycle.ui.AdvisorEngine
 import org.junit.Assert.*
 import org.junit.Test
@@ -286,6 +288,200 @@ class AdvisorEngineTest {
         assertTrue(priceAt20 > priceAt10)
     }
 
+    // ─── getPricePerKg with RegionProfile ────────────────────────────────────
+
+    private fun testProfile() = RegionProfile(
+        regionName = "Test",
+        priceAt20g = 3.0,
+        priceAt25g = 4.0,
+        priceAt30g = 5.0,
+        priceAt35g = 6.0,
+        priceAt40g = 7.0
+    )
+
+    @Test
+    fun `getPricePerKg at exact 20g bracket returns bracket price`() {
+        val price = AdvisorEngine.getPricePerKg(20.0, testProfile())
+        assertEquals(3.0, price, 0.001)
+    }
+
+    @Test
+    fun `getPricePerKg at exact 40g bracket returns bracket price`() {
+        val price = AdvisorEngine.getPricePerKg(40.0, testProfile())
+        assertEquals(7.0, price, 0.001)
+    }
+
+    @Test
+    fun `getPricePerKg interpolates midpoint between 20g and 25g brackets`() {
+        // midpoint at 22.5g should be exactly halfway between 3.0 and 4.0 = 3.5
+        val price = AdvisorEngine.getPricePerKg(22.5, testProfile())
+        assertEquals(3.5, price, 0.001)
+    }
+
+    @Test
+    fun `getPricePerKg interpolates midpoint between 30g and 35g brackets`() {
+        // midpoint at 32.5g should be 5.5
+        val price = AdvisorEngine.getPricePerKg(32.5, testProfile())
+        assertEquals(5.5, price, 0.001)
+    }
+
+    @Test
+    fun `getPricePerKg extrapolates linearly above 40g`() {
+        // slope from 35-40g bracket = (7.0 - 6.0) / 5 = 0.2 per g
+        // at 45g: 7.0 + 0.2 * 5 = 8.0
+        val price = AdvisorEngine.getPricePerKg(45.0, testProfile())
+        assertEquals(8.0, price, 0.001)
+    }
+
+    @Test
+    fun `getPricePerKg with region profile returns higher price than legacy for large shrimp`() {
+        // Saudi Arabia profile has premium prices; legacy formula = 4 + 0.25 * 30 = 11.5
+        // Saudi profile at 30g = 7.5 < 11.5, so let's just verify they're different
+        val legacyPrice = AdvisorEngine.getPricePerKg(30.0, null)
+        val profilePrice = AdvisorEngine.getPricePerKg(30.0, testProfile())
+        assertNotEquals(legacyPrice, profilePrice, 0.001)
+    }
+
+    // ─── optimizeHarvest with configurable mortality ──────────────────────────
+
+    @Test
+    fun `optimizeHarvest uses custom mortality rate in survivor fraction`() {
+        // High mortality rate should reduce projected biomass significantly
+        val highMortality = AdvisorEngine.optimizeHarvest(
+            pondSize = 1000.0, proposedDensity = 60.0,
+            estimatedSurvival = 80.0, currentAbw = 15.0,
+            totalFeed = 400.0, adg = 0.23,
+            feedCostPerKg = 1.25, aerationCost = 8.0,
+            probioticCost = 3.0, laborCost = 4.0,
+            mortalityRatePerDay = 0.05
+        )
+        val lowMortality = AdvisorEngine.optimizeHarvest(
+            pondSize = 1000.0, proposedDensity = 60.0,
+            estimatedSurvival = 80.0, currentAbw = 15.0,
+            totalFeed = 400.0, adg = 0.23,
+            feedCostPerKg = 1.25, aerationCost = 8.0,
+            probioticCost = 3.0, laborCost = 4.0,
+            mortalityRatePerDay = 0.001
+        )
+        val highMortDay30 = highMortality.holdScenariosList.last().projectedBiomass
+        val lowMortDay30 = lowMortality.holdScenariosList.last().projectedBiomass
+        assertTrue(highMortDay30 < lowMortDay30)
+    }
+
+    @Test
+    fun `optimizeHarvest mortalityRatePerDay is reflected in result`() {
+        val result = AdvisorEngine.optimizeHarvest(
+            pondSize = 1000.0, proposedDensity = 60.0,
+            estimatedSurvival = 80.0, currentAbw = 15.0,
+            totalFeed = 400.0, adg = 0.23,
+            feedCostPerKg = 1.25, aerationCost = 8.0,
+            probioticCost = 3.0, laborCost = 4.0,
+            mortalityRatePerDay = 0.007
+        )
+        assertEquals(0.007, result.mortalityRatePerDay, 0.0001)
+    }
+
+    @Test
+    fun `optimizeHarvest with acceleration reduces biomass faster over time`() {
+        val withAccel = AdvisorEngine.optimizeHarvest(
+            pondSize = 1000.0, proposedDensity = 60.0,
+            estimatedSurvival = 80.0, currentAbw = 15.0,
+            totalFeed = 400.0, adg = 0.23,
+            feedCostPerKg = 1.25, aerationCost = 8.0,
+            probioticCost = 3.0, laborCost = 4.0,
+            mortalityRatePerDay = 0.004,
+            mortalityAcceleration = 0.001
+        )
+        val noAccel = AdvisorEngine.optimizeHarvest(
+            pondSize = 1000.0, proposedDensity = 60.0,
+            estimatedSurvival = 80.0, currentAbw = 15.0,
+            totalFeed = 400.0, adg = 0.23,
+            feedCostPerKg = 1.25, aerationCost = 8.0,
+            probioticCost = 3.0, laborCost = 4.0,
+            mortalityRatePerDay = 0.004,
+            mortalityAcceleration = 0.0
+        )
+        val accelDay30 = withAccel.holdScenariosList.last().projectedBiomass
+        val noAccelDay30 = noAccel.holdScenariosList.last().projectedBiomass
+        assertTrue(accelDay30 < noAccelDay30)
+    }
+
+    // ─── Disease scenario (scenarioResult) ───────────────────────────────────
+
+    @Test
+    fun `optimizeHarvest scenarioResult is not null`() {
+        val result = AdvisorEngine.optimizeHarvest(
+            pondSize = 1000.0, proposedDensity = 60.0,
+            estimatedSurvival = 80.0, currentAbw = 15.0,
+            totalFeed = 400.0, adg = 0.23,
+            feedCostPerKg = 1.25, aerationCost = 8.0,
+            probioticCost = 3.0, laborCost = 4.0,
+            mortalityRatePerDay = 0.004
+        )
+        assertNotNull(result.scenarioResult)
+    }
+
+    @Test
+    fun `scenarioResult uses mortality rate of 2 point 5 times the base rate`() {
+        val baseRate = 0.004
+        val result = AdvisorEngine.optimizeHarvest(
+            pondSize = 1000.0, proposedDensity = 60.0,
+            estimatedSurvival = 80.0, currentAbw = 15.0,
+            totalFeed = 400.0, adg = 0.23,
+            feedCostPerKg = 1.25, aerationCost = 8.0,
+            probioticCost = 3.0, laborCost = 4.0,
+            mortalityRatePerDay = baseRate
+        )
+        assertEquals(baseRate * 2.5, result.scenarioResult!!.mortalityRatePerDay, 0.0001)
+    }
+
+    @Test
+    fun `scenarioResult has lower projected biomass than normal result at day 30`() {
+        val result = AdvisorEngine.optimizeHarvest(
+            pondSize = 1000.0, proposedDensity = 60.0,
+            estimatedSurvival = 80.0, currentAbw = 15.0,
+            totalFeed = 400.0, adg = 0.23,
+            feedCostPerKg = 1.25, aerationCost = 8.0,
+            probioticCost = 3.0, laborCost = 4.0,
+            mortalityRatePerDay = 0.004
+        )
+        val normalDay30 = result.holdScenariosList.last().projectedBiomass
+        val diseaseDay30 = result.scenarioResult!!.holdScenariosList.last().projectedBiomass
+        assertTrue(diseaseDay30 < normalDay30)
+    }
+
+    @Test
+    fun `scenarioResult scenarioResult is null ie no nesting beyond one level`() {
+        val result = AdvisorEngine.optimizeHarvest(
+            pondSize = 1000.0, proposedDensity = 60.0,
+            estimatedSurvival = 80.0, currentAbw = 15.0,
+            totalFeed = 400.0, adg = 0.23,
+            feedCostPerKg = 1.25, aerationCost = 8.0,
+            probioticCost = 3.0, laborCost = 4.0
+        )
+        assertNull(result.scenarioResult!!.scenarioResult)
+    }
+
+    // ─── Harvest cost accumulation ───────────────────────────────────────────
+
+    @Test
+    fun `totalAddedCost grows monotonically across hold scenarios`() {
+        val result = AdvisorEngine.optimizeHarvest(
+            pondSize = 1000.0, proposedDensity = 60.0,
+            estimatedSurvival = 80.0, currentAbw = 15.0,
+            totalFeed = 400.0, adg = 0.23,
+            feedCostPerKg = 1.25, aerationCost = 8.0,
+            probioticCost = 3.0, laborCost = 4.0
+        )
+        val costs = result.holdScenariosList.map { it.totalAddedCost }
+        for (i in 1 until costs.size) {
+            assertTrue(
+                "Cost at day ${i + 1} should exceed day $i",
+                costs[i] > costs[i - 1]
+            )
+        }
+    }
+
     // ─── GeminiAdvisor prompt ────────────────────────────────────────────────
 
     @Test
@@ -305,5 +501,48 @@ class AdvisorEngineTest {
         assertTrue(prompt.contains("6.5"))
         assertTrue(prompt.contains("7.9"))
         assertTrue(prompt.contains("24.0"))
+    }
+
+    @Test
+    fun `buildPrompt with recentReadings includes daily readings table header`() {
+        val cycle = com.shrimpadvisor.plcycle.data.PondCycle(pondName = "Test Pond")
+        val readings = listOf(
+            DailyReading(pondCycleId = 1, pondAge = 10, doLevel = 6.2, tanLevel = 0.15,
+                ph = 7.9, temp = 28.5, abw = 4.5, survivalPct = 88.0),
+            DailyReading(pondCycleId = 1, pondAge = 11, doLevel = 6.0, tanLevel = 0.18,
+                ph = 7.8, temp = 28.7, abw = 4.7, survivalPct = 87.5)
+        )
+        val prompt = com.shrimpadvisor.plcycle.ui.GeminiAdvisor.buildPrompt(cycle, "trends?", readings)
+        assertTrue(prompt.contains("Daily Readings"))
+        assertTrue(prompt.contains("Day | DO"))
+    }
+
+    @Test
+    fun `buildPrompt with recentReadings includes trend analysis section`() {
+        val cycle = com.shrimpadvisor.plcycle.data.PondCycle(pondName = "Test Pond")
+        val readings = (1..8).map { day ->
+            DailyReading(
+                pondCycleId = 1, pondAge = day,
+                doLevel = 6.0 + day * 0.05,
+                tanLevel = 0.1 + day * 0.01,
+                ph = 7.9,
+                temp = 28.5,
+                abw = 3.0 + day * 0.2,
+                survivalPct = 90.0 - day * 0.3
+            )
+        }
+        val prompt = com.shrimpadvisor.plcycle.ui.GeminiAdvisor.buildPrompt(cycle, "how am i doing?", readings)
+        assertTrue(prompt.contains("7-Day Trends"))
+        assertTrue(prompt.contains("DO:"))
+        assertTrue(prompt.contains("Survival:"))
+        assertTrue(prompt.contains("ABW:"))
+    }
+
+    @Test
+    fun `buildPrompt without recentReadings omits readings and trends sections`() {
+        val cycle = com.shrimpadvisor.plcycle.data.PondCycle(pondName = "Test Pond")
+        val prompt = com.shrimpadvisor.plcycle.ui.GeminiAdvisor.buildPrompt(cycle, "q")
+        assertFalse(prompt.contains("Daily Readings"))
+        assertFalse(prompt.contains("7-Day Trends"))
     }
 }

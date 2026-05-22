@@ -397,6 +397,7 @@ object AdvisorEngine {
 
         fun runSimulation(baseRate: Double, acceleration: Double): HarvestOptimizerResult {
             val scenariosList = mutableListOf<HoldScenario>()
+            var accumulatedCost = 0.0
 
             for (day in 1..30) {
                 val survivorFraction = (1..day).fold(1.0) { acc, d ->
@@ -408,13 +409,10 @@ object AdvisorEngine {
                 val projectedPrice = getPricePerKg(projectedWeight, regionProfile)
                 val projectedRevenue = projectedBiomass * projectedPrice
 
-                val expectedDailyFeedNeeded = projectedBiomass * 0.025
-                val dailyFeedCost = expectedDailyFeedNeeded * feedCostPerKg
+                val dailyFeedCost = projectedBiomass * 0.025 * feedCostPerKg
+                accumulatedCost += aerationCost + probioticCost + laborCost + dailyFeedCost
 
-                val totalDailyAddedCost = aerationCost + probioticCost + laborCost + dailyFeedCost
-                val totalAddedCost = totalDailyAddedCost * day
-
-                val netAddedGain = projectedRevenue - currentRevenue - totalAddedCost
+                val netAddedGain = projectedRevenue - currentRevenue - accumulatedCost
 
                 scenariosList.add(
                     HoldScenario(
@@ -422,7 +420,7 @@ object AdvisorEngine {
                         projectedWeight = projectedWeight,
                         projectedBiomass = projectedBiomass,
                         projectedPricePerKg = projectedPrice,
-                        totalAddedCost = totalAddedCost,
+                        totalAddedCost = accumulatedCost,
                         netAddedGain = netAddedGain
                     )
                 )

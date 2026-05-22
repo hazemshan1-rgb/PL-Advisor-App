@@ -13,9 +13,10 @@ An Android app that gives intensive *L. vannamei* (whiteleg shrimp) farmers a fu
 | **Stocking** | Calculates safe carrying capacity, optimal stocking density, and flags out-of-range water parameters |
 | **Survival** | Plots survival trajectory against the industry reference curve; classifies deviations as Environmental or Pathogenic with directed interventions; logs historical daily readings |
 | **FCR & Cost** | Real-time FCR index, cost-per-kg breakdown across feed, PL, aeration, probiotics, and labour |
-| **Optimizer** | 30-day hold-vs-harvest simulation showing the net gain for every extra day before harvest |
-| **AI Advisor** | Gemini-powered chat that answers natural-language questions with full pond context pre-loaded |
+| **Optimizer** | 30-day hold-vs-harvest simulation with cumulative cost tracking; configurable daily mortality rate and weekly acceleration; includes a side-by-side disease scenario at ×2.5 baseline mortality |
+| **AI Advisor** | Gemini 2.0 Flash chat with full pond context, last 14 daily readings, and 7-day trend analysis (DO, TAN, pH, survival, ABW) pre-loaded in every prompt |
 | **Report** | Consolidated text report with one-tap Copy or Share to any messaging app |
+| **Regions** | Built-in regional price profiles (Vietnam, Indonesia, Saudi Arabia, Generic) with 5-bracket size-based pricing (20 g → 40 g) and linear interpolation; add unlimited custom profiles |
 
 ---
 
@@ -55,20 +56,26 @@ Open the project in Android Studio, wait for Gradle sync, and press **Run**.
 ```
 app/
 ├── data/            # Room entities, DAOs, database, repository
-│   ├── PondCycle        — master record for one grow cycle
-│   └── DailyReading     — time-series log: water params + survival per day
+│   ├── PondCycle        — master record for one grow cycle; includes configurable
+│   │                      mortality rate, weekly acceleration, and region profile link
+│   ├── DailyReading     — time-series log: water params + survival per day
+│   └── RegionProfile    — regional price profiles with 5 size-bracket prices
 └── ui/
     ├── AdvisorEngine    — pure Kotlin business logic (no Android deps, fully testable)
-    ├── GeminiAdvisor    — Gemini REST API client (OkHttp + Moshi)
+    │                      Module 5 uses a running cost accumulator and runs both a
+    │                      normal and a disease scenario (×2.5 mortality) in one call
+    ├── GeminiAdvisor    — Gemini REST API client (OkHttp + Moshi); buildPrompt injects
+    │                      last 14 readings + 7-day half-period trend analysis
     ├── PondCycleViewModel
-    ├── ShrimpAppScreens — tab navigation + all 8 tab composables
+    ├── ShrimpAppScreens — tab navigation + all composables including RegionSelectorCard,
+    │                      MortalitySettingsCard, and disease scenario comparison panel
     ├── AiAdvisorScreen  — chat UI
     └── Components       — reusable charts (FCR gauge, survival curve, profit bar)
 ```
 
 **State management**: Room → Repository → `StateFlow` in ViewModel → Compose `collectAsStateWithLifecycle`.
 
-**Database**: Room v2 with a migration that adds `daily_readings` without destroying existing pond data.
+**Database**: Room v3 with three cumulative migrations. Migration 2→3 creates the `region_profiles` table, seeds 4 built-in profiles, and adds `regionProfileId` to `pond_cycles`.
 
 ---
 
@@ -78,7 +85,7 @@ app/
 ./gradlew test
 ```
 
-Unit tests cover all five `AdvisorEngine` modules (STOCK/HOLD/REJECT verdicts, GREEN/YELLOW/RED survival, environmental vs pathogenic classification, FCR ranges, harvest optimisation) and the Gemini prompt builder.
+Unit tests cover all five `AdvisorEngine` modules including the new features: regional price interpolation across 5 brackets, extrapolation above 40 g, configurable mortality rate and weekly acceleration, disease scenario verification (×2.5 rate, lower biomass, no nested recursion), cumulative cost monotonicity, and `buildPrompt` with historical readings and 7-day trend output.
 
 ---
 
