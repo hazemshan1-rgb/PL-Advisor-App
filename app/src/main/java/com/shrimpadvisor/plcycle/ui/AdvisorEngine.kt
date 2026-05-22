@@ -1,4 +1,4 @@
-package com.example.ui
+package com.shrimpadvisor.plcycle.ui
 
 import kotlin.math.max
 import kotlin.math.min

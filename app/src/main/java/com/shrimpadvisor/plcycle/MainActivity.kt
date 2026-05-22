@@ -1,4 +1,4 @@
-package com.example
+package com.shrimpadvisor.plcycle
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -9,12 +9,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import com.example.data.PondCycleDatabase
-import com.example.data.PondCycleRepository
-import com.example.ui.PondCycleViewModel
-import com.example.ui.PondCycleViewModelFactory
-import com.example.ui.ShrimpAppMainContainer
-import com.example.ui.theme.MyApplicationTheme
+import com.shrimpadvisor.plcycle.data.PondCycleDatabase
+import com.shrimpadvisor.plcycle.data.PondCycleRepository
+import com.shrimpadvisor.plcycle.ui.PondCycleViewModel
+import com.shrimpadvisor.plcycle.ui.PondCycleViewModelFactory
+import com.shrimpadvisor.plcycle.ui.ShrimpAppMainContainer
+import com.shrimpadvisor.plcycle.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -23,7 +23,7 @@ class MainActivity : ComponentActivity() {
 
         // Construct Database and Repository elements
         val database = PondCycleDatabase.getDatabase(this)
-        val repository = PondCycleRepository(database.pondCycleDao())
+        val repository = PondCycleRepository(database.pondCycleDao(), database.dailyReadingDao())
 
         val viewModel: PondCycleViewModel by viewModels {
             PondCycleViewModelFactory(application, repository)

@@ -1,13 +1,14 @@
-package com.example.ui
+package com.shrimpadvisor.plcycle.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.example.data.PondCycle
-import com.example.data.PondCycleDatabase
-import com.example.data.PondCycleRepository
+import com.shrimpadvisor.plcycle.BuildConfig
+import com.shrimpadvisor.plcycle.data.DailyReading
+import com.shrimpadvisor.plcycle.data.PondCycle
+import com.shrimpadvisor.plcycle.data.PondCycleRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -28,14 +29,15 @@ class PondCycleViewModel(
     val activeCycle: StateFlow<PondCycle?> = _activeCycle.asStateFlow()
 
     init {
-        // Automatically fetch or initialize a default cycle if none exist
         viewModelScope.launch {
-            allCycles.filter { it.isNotEmpty() }.firstOrNull()?.let { list ->
+            // Use repository.allCycles directly (cold Flow) so we wait for Room to emit
+            // the actual DB state rather than the StateFlow's emptyList() initial value.
+            val firstEmission = repository.allCycles.first()
+            if (firstEmission.isNotEmpty()) {
                 if (_activeCycle.value == null) {
-                    _activeCycle.value = list.first()
+                    _activeCycle.value = firstEmission.first()
                 }
-            } ?: run {
-                // If list is empty, pre-populate default cycle
+            } else {
                 val default = PondCycle(pondName = "Seaside Pond Alpha")
                 val idLong = repository.insert(default)
                 _activeCycle.value = default.copy(id = idLong.toInt())
@@ -43,16 +45,37 @@ class PondCycleViewModel(
         }
     }
 
+    // Daily readings for the currently active cycle
+    val activeReadings: StateFlow<List<DailyReading>> = activeCycle
+        .flatMapLatest { cycle ->
+            if (cycle != null) {
+                repository.getReadingsForCycle(cycle.id)
+            } else {
+                flowOf(emptyList())
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // AI chat state
+    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
+
+    private val _isAiLoading = MutableStateFlow(false)
+    val isAiLoading: StateFlow<Boolean> = _isAiLoading.asStateFlow()
+
     fun selectCycle(cycle: PondCycle) {
         _activeCycle.value = cycle
     }
 
     fun createNewPond(name: String, size: Double, density: Double) {
+        val safeName = name.trim().take(80).ifBlank { "New Pond" }
+        val safeSize = size.coerceIn(10.0, 100_000.0)
+        val safeDensity = density.coerceIn(1.0, 500.0)
         viewModelScope.launch(Dispatchers.IO) {
             val newCycle = PondCycle(
-                pondName = name,
-                pondSize = size,
-                proposedDensity = density,
+                pondName = safeName,
+                pondSize = safeSize,
+                proposedDensity = safeDensity,
                 stockingDate = System.currentTimeMillis()
             )
             val newId = repository.insert(newCycle)
@@ -63,13 +86,11 @@ class PondCycleViewModel(
     fun deleteCycle(cycle: PondCycle) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.delete(cycle)
-            // If the deleted cycle was the active one, pick another
             if (_activeCycle.value?.id == cycle.id) {
                 val remnants = allCycles.value.filter { it.id != cycle.id }
                 if (remnants.isNotEmpty()) {
                     _activeCycle.value = remnants.first()
                 } else {
-                    // Create an empty fallback
                     val fallback = PondCycle(pondName = "Main Nursery Delta")
                     val idLoc = repository.insert(fallback)
                     _activeCycle.value = fallback.copy(id = idLoc.toInt())
@@ -81,17 +102,67 @@ class PondCycleViewModel(
     fun updateActiveCycle(updater: (PondCycle) -> PondCycle) {
         _activeCycle.update { current ->
             current?.let {
-                val updated = updater(it)
-                // Debounce/auto save to database
+                val raw = updater(it)
+                val sanitized = raw.copy(
+                    pondName = raw.pondName.trim().take(80).ifBlank { it.pondName },
+                    pondSize = raw.pondSize.coerceIn(10.0, 100_000.0),
+                    proposedDensity = raw.proposedDensity.coerceIn(1.0, 500.0),
+                    ph = raw.ph.coerceIn(4.0, 11.0),
+                    doLevel = raw.doLevel.coerceIn(0.0, 30.0),
+                    salinity = raw.salinity.coerceIn(0.0, 45.0),
+                    temp = raw.temp.coerceIn(5.0, 45.0),
+                    tanLevel = raw.tanLevel.coerceIn(0.0, 20.0),
+                    estimatedSurvival = raw.estimatedSurvival.coerceIn(0.0, 100.0),
+                    currentAbw = raw.currentAbw.coerceAtLeast(0.0),
+                    currentAge = raw.currentAge.coerceAtLeast(0),
+                    totalFeedConsumed = raw.totalFeedConsumed.coerceAtLeast(0.0),
+                    averageDailyGain = raw.averageDailyGain.coerceIn(0.0, 5.0),
+                    feedCostPerKg = raw.feedCostPerKg.coerceAtLeast(0.0),
+                    plUnitCost = raw.plUnitCost.coerceAtLeast(0.0)
+                )
                 viewModelScope.launch(Dispatchers.IO) {
-                    repository.update(updated)
+                    repository.update(sanitized)
                 }
-                updated
+                sanitized
             }
         }
     }
 
-    // Calculations streams
+    fun logDailyReading() {
+        val cycle = _activeCycle.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.insertDailyReading(
+                DailyReading(
+                    pondCycleId = cycle.id,
+                    pondAge = cycle.currentAge,
+                    survivalPct = cycle.estimatedSurvival,
+                    doLevel = cycle.doLevel,
+                    tanLevel = cycle.tanLevel,
+                    ph = cycle.ph,
+                    temp = cycle.temp,
+                    abw = cycle.currentAbw
+                )
+            )
+        }
+    }
+
+    fun sendChatMessage(question: String) {
+        val cycle = _activeCycle.value ?: return
+        val userMsg = ChatMessage(text = question, isUser = true)
+        _chatMessages.update { it + userMsg }
+        _isAiLoading.value = true
+        viewModelScope.launch {
+            val reply = GeminiAdvisor.ask(BuildConfig.GEMINI_API_KEY, cycle, question)
+            _chatMessages.update { it + ChatMessage(text = reply, isUser = false) }
+            _isAiLoading.value = false
+        }
+    }
+
+    fun clearChat() {
+        _chatMessages.value = emptyList()
+    }
+
+    // Calculation streams
     val plQualityResult = activeCycle.map { cycle ->
         cycle?.let {
             AdvisorEngine.evaluatePLQuality(

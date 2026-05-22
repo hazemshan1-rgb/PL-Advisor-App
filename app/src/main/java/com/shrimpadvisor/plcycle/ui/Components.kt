@@ -1,4 +1,4 @@
-package com.example.ui
+package com.shrimpadvisor.plcycle.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.shrimpadvisor.plcycle.data.DailyReading
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -211,6 +212,7 @@ fun SurvivalCurveChart(
     currentDay: Int,
     estimatedSurvival: Double,
     expectedSurvival: Double,
+    historicalReadings: List<DailyReading> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -267,6 +269,29 @@ fun SurvivalCurveChart(
                 color = AquaticColors.ElectricTeal.copy(alpha = 0.5f),
                 style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
             )
+
+            // Historical reading dots — connect with a thin line then mark each point
+            val visibleHistory = historicalReadings.filter { it.pondAge in 1..30 }
+            if (visibleHistory.size >= 2) {
+                val histPath = Path().apply {
+                    val first = visibleHistory.first()
+                    val pt = getCoordinates(first.pondAge.toFloat(), first.survivalPct.toFloat())
+                    moveTo(pt.x, pt.y)
+                    visibleHistory.drop(1).forEach { r ->
+                        val p = getCoordinates(r.pondAge.toFloat(), r.survivalPct.toFloat())
+                        lineTo(p.x, p.y)
+                    }
+                }
+                drawPath(
+                    path = histPath,
+                    color = AquaticColors.SandGold.copy(alpha = 0.6f),
+                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+            visibleHistory.forEach { r ->
+                val pt = getCoordinates(r.pondAge.toFloat(), r.survivalPct.toFloat())
+                drawCircle(color = AquaticColors.SandGold, radius = 4.dp.toPx(), center = pt)
+            }
 
             // Current user sampling point
             if (currentDay in 1..30) {

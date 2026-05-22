@@ -1,4 +1,4 @@
-package com.example.ui
+package com.shrimpadvisor.plcycle.ui
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
@@ -18,7 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import android.content.Intent
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -26,7 +28,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.data.PondCycle
+import com.shrimpadvisor.plcycle.data.DailyReading
+import com.shrimpadvisor.plcycle.data.PondCycle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,6 +45,10 @@ fun ShrimpAppMainContainer(
     val survival by viewModel.survivalResult.collectAsStateWithLifecycle()
     val cost by viewModel.costResult.collectAsStateWithLifecycle()
     val harvest by viewModel.harvestResult.collectAsStateWithLifecycle()
+
+    val activeReadings by viewModel.activeReadings.collectAsStateWithLifecycle()
+    val chatMessages by viewModel.chatMessages.collectAsStateWithLifecycle()
+    val isAiLoading by viewModel.isAiLoading.collectAsStateWithLifecycle()
 
     var activeTab by remember { mutableStateOf(0) }
     var showNewPondDialog by remember { mutableStateOf(false) }
@@ -64,7 +71,7 @@ fun ShrimpAppMainContainer(
                 },
                 actions = {
                     IconButton(
-                        onClick = { activeTab = 6 }, // Switch to report
+                        onClick = { activeTab = 7 }, // Switch to report
                         modifier = Modifier.testTag("report_shortcut_button")
                     ) {
                         Icon(
@@ -101,6 +108,7 @@ fun ShrimpAppMainContainer(
                     Pair("Survival", Icons.Default.Analytics),
                     Pair("FCR & Cost", Icons.Default.Payments),
                     Pair("Optimizer", Icons.Default.TrendingUp),
+                    Pair("AI Advisor", Icons.Default.SmartToy),
                     Pair("Report", Icons.Default.Summarize)
                 ).forEachIndexed { index, (label, icon) ->
                     Tab(
@@ -165,7 +173,9 @@ fun ShrimpAppMainContainer(
                             3 -> SurvivalMonitorTab(
                                 cycle = activeCycle!!,
                                 result = survival,
-                                onUpdate = { viewModel.updateActiveCycle(it) }
+                                onUpdate = { viewModel.updateActiveCycle(it) },
+                                dailyReadings = activeReadings,
+                                onLogReading = { viewModel.logDailyReading() }
                             )
                             4 -> CostTrackerTab(
                                 cycle = activeCycle!!,
@@ -177,7 +187,13 @@ fun ShrimpAppMainContainer(
                                 result = harvest,
                                 onUpdate = { viewModel.updateActiveCycle(it) }
                             )
-                            6 -> ReportSummaryTab(
+                            6 -> AiAdvisorTab(
+                                cycle = activeCycle!!,
+                                chatMessages = chatMessages,
+                                isAiLoading = isAiLoading,
+                                onSendMessage = { viewModel.sendChatMessage(it) }
+                            )
+                            7 -> ReportSummaryTab(
                                 cycle = activeCycle!!,
                                 plResult = plQuality,
                                 stocking = stocking,
@@ -962,7 +978,9 @@ fun WaterMetricSlider(
 fun SurvivalMonitorTab(
     cycle: PondCycle,
     result: AdvisorEngine.SurvivalTrajectoryResult?,
-    onUpdate: ((PondCycle) -> PondCycle) -> Unit
+    onUpdate: ((PondCycle) -> PondCycle) -> Unit,
+    dailyReadings: List<DailyReading> = emptyList(),
+    onLogReading: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -1012,13 +1030,34 @@ fun SurvivalMonitorTab(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // Log today's reading button
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "${dailyReadings.size} reading(s) logged",
+                fontSize = 12.sp,
+                color = AquaticColors.SoftMutedText
+            )
+            OutlinedButton(onClick = onLogReading) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Log Today", fontSize = 12.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         // Curve Graph
         if (result != null) {
             Text("Survival Deviation Graphic", fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
             SurvivalCurveChart(
                 currentDay = cycle.currentAge,
                 estimatedSurvival = cycle.estimatedSurvival,
-                expectedSurvival = result.expectedSurvival
+                expectedSurvival = result.expectedSurvival,
+                historicalReadings = dailyReadings
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -1388,6 +1427,7 @@ fun ReportSummaryTab(
     harvest: AdvisorEngine.HarvestOptimizerResult?
 ) {
     val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
     var showCopiedToast by remember { mutableStateOf(false) }
 
     val reportText = """
@@ -1467,19 +1507,42 @@ Projected profitability uplift: ${harvest?.profitDifferential?.let { String.form
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Button(
-                    onClick = {
-                        clipboardManager.setText(AnnotatedString(reportText))
-                        showCopiedToast = true
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("copy_report_button"),
-                    shape = RoundedCornerShape(8.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy")
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Copy Report to Clipboard", fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(reportText))
+                            showCopiedToast = true
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("copy_report_button"),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Copy", fontWeight = FontWeight.Bold)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, reportText)
+                                putExtra(Intent.EXTRA_SUBJECT, "Shrimp Cycle Report — ${cycle.pondName}")
+                            }
+                            context.startActivity(Intent.createChooser(intent, "Share Report"))
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("share_report_button"),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = "Share", modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Share", fontWeight = FontWeight.Bold)
+                    }
                 }
 
                 if (showCopiedToast) {
