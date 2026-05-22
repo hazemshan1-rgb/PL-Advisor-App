@@ -118,31 +118,31 @@ object AdvisorEngine {
         val checks = listOf(
             WaterParameterCheck(
                 name = "Dissolved Oxygen (DO)",
-                valueString = "$oxygen ppm",
+                valueString = String.format("%.1f ppm", oxygen),
                 isOptimal = oxygen >= 5.5,
                 rangeMessage = "Optimal: ≥ 5.5 ppm (Hard Floor)"
             ),
             WaterParameterCheck(
                 name = "pH",
-                valueString = String.format("%.2f", ph),
+                valueString = String.format("%.1f", ph),
                 isOptimal = ph in 7.5..8.5,
                 rangeMessage = "Optimal: 7.5 – 8.5"
             ),
             WaterParameterCheck(
                 name = "Salinity",
-                valueString = "$salinity ppt",
+                valueString = String.format("%.1f ppt", salinity),
                 isOptimal = salinity in 15.0..35.0,
                 rangeMessage = "Optimal: 15.0 – 35.0 ppt"
             ),
             WaterParameterCheck(
                 name = "Temperature",
-                valueString = "$temp °C",
+                valueString = String.format("%.1f °C", temp),
                 isOptimal = temp in 26.0..32.0,
                 rangeMessage = "Optimal: 26.0 – 32.0 °C"
             ),
             WaterParameterCheck(
                 name = "Ammonia (TAN)",
-                valueString = "$tan ppm",
+                valueString = String.format("%.1f ppm", tan),
                 isOptimal = tan < 1.0,
                 rangeMessage = "Optimal: < 1.0 ppm"
             )

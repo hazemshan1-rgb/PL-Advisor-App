@@ -32,12 +32,146 @@ import com.shrimpadvisor.plcycle.data.DailyReading
 import com.shrimpadvisor.plcycle.data.PondCycle
 import com.shrimpadvisor.plcycle.data.RegionProfile
 
+@Composable
+fun WelcomeScreen(onGetStarted: () -> Unit) {
+    val steps = listOf(
+        Triple(Icons.Default.VerifiedUser, "PL Gate", "Score your post-larvae batch before stocking — get a STOCK, HOLD, or REJECT verdict."),
+        Triple(Icons.Default.WaterDrop, "Stocking", "Set pond size and density; the engine checks carrying capacity and all 5 water parameters."),
+        Triple(Icons.Default.Analytics, "Survival", "Log daily readings to track survival trajectory against the industry reference curve."),
+        Triple(Icons.Default.Payments, "FCR & Cost", "Monitor your real-time cost per kg and feed conversion ratio as the cycle progresses."),
+        Triple(Icons.Default.TrendingUp, "Optimizer", "Run a 30-day hold-vs-harvest simulation to find the most profitable harvest window."),
+        Triple(Icons.Default.SmartToy, "AI Advisor", "Ask any question in plain language — the AI has your full pond data and trend history loaded.")
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 40.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "🦐",
+                fontSize = 56.sp,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "PL Cycle Advisor",
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                text = "Decision support for intensive L. vannamei farming",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Text(
+                text = "HOW IT WORKS",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                letterSpacing = 1.5.sp
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            steps.forEach { (icon, title, desc) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(title, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(desc, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), lineHeight = 17.sp)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Card(
+                shape = RoundedCornerShape(10.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(Icons.Default.Info, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
+                    Text(
+                        text = "For the AI Advisor to work, add your Gemini API key to the .env file and rebuild. All other modules work offline.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Button(
+                onClick = onGetStarted,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Get Started", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShrimpAppMainContainer(
     viewModel: PondCycleViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("pl_advisor_prefs", android.content.Context.MODE_PRIVATE) }
+    var showWelcome by remember { mutableStateOf(!prefs.getBoolean("hasSeenWelcome", false)) }
+
+    if (showWelcome) {
+        WelcomeScreen(onGetStarted = {
+            prefs.edit().putBoolean("hasSeenWelcome", true).apply()
+            showWelcome = false
+        })
+        return
+    }
+
     val cycles by viewModel.allCycles.collectAsStateWithLifecycle()
     val activeCycle by viewModel.activeCycle.collectAsStateWithLifecycle()
 
@@ -74,13 +208,25 @@ fun ShrimpAppMainContainer(
                 },
                 actions = {
                     IconButton(
-                        onClick = { activeTab = 7 }, // Switch to report
+                        onClick = { activeTab = 6 },
+                        modifier = Modifier.testTag("ai_advisor_shortcut_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SmartToy,
+                            contentDescription = "AI Advisor",
+                            tint = if (activeTab == 6) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
+                        onClick = { activeTab = 7 },
                         modifier = Modifier.testTag("report_shortcut_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Description,
                             contentDescription = "Report",
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = if (activeTab == 7) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 },
