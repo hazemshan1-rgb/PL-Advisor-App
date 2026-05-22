@@ -152,7 +152,10 @@ class PondCycleViewModel(
         _chatMessages.update { it + userMsg }
         _isAiLoading.value = true
         viewModelScope.launch {
-            val reply = GeminiAdvisor.ask(BuildConfig.GEMINI_API_KEY, cycle, question)
+            val last14Readings = activeReadings.value
+                .sortedBy { it.pondAge }
+                .takeLast(14)
+            val reply = GeminiAdvisor.ask(BuildConfig.GEMINI_API_KEY, cycle, question, last14Readings)
             _chatMessages.update { it + ChatMessage(text = reply, isUser = false) }
             _isAiLoading.value = false
         }
