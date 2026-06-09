@@ -41,6 +41,121 @@ object AquaticColors {
     val GridLineColor = Color(0xFFDCE4E5) // Clean border line
 }
 
+@Composable
+fun SummaryCard(
+    title: String,
+    statusText: String,
+    statusColor: Color,
+    scoreText: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit
+) {
+    androidx.compose.material3.Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .androidx.compose.foundation.clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(statusColor.copy(alpha = 0.1f), RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                androidx.compose.material3.Icon(icon, contentDescription = null, tint = statusColor, modifier = Modifier.size(22.dp))
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(statusText, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            Text(
+                text = scoreText,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = statusColor,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun FeedingReminderCard(pondName: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var remindersEnabled by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    androidx.compose.material3.Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(AquaticColors.ElectricTeal.copy(alpha = 0.1f), RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                androidx.compose.material3.Icon(
+                    androidx.compose.material.icons.Icons.Default.Notifications,
+                    contentDescription = null,
+                    tint = AquaticColors.ElectricTeal,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Feeding Reminders", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    if (remindersEnabled) "Twice-daily reminders active (06:00 & 18:00)"
+                    else "Enable to get morning & evening feeding alerts",
+                    fontSize = 11.sp,
+                    color = AquaticColors.SoftMutedText
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = remindersEnabled,
+                onCheckedChange = { enabled ->
+                    remindersEnabled = enabled
+                    val workManager = androidx.work.WorkManager.getInstance(context)
+                    if (enabled) {
+                        val data = androidx.work.Data.Builder()
+                            .putString(com.shrimpadvisor.plcycle.FeedingReminderWorker.KEY_POND_NAME, pondName)
+                            .build()
+                        val morningRequest = androidx.work.PeriodicWorkRequestBuilder<com.shrimpadvisor.plcycle.FeedingReminderWorker>(
+                            12, java.util.concurrent.TimeUnit.HOURS
+                        ).setInputData(data)
+                            .addTag(com.shrimpadvisor.plcycle.FeedingReminderWorker.WORK_TAG)
+                            .build()
+                        workManager.enqueueUniquePeriodicWork(
+                            com.shrimpadvisor.plcycle.FeedingReminderWorker.WORK_TAG,
+                            androidx.work.ExistingPeriodicWorkPolicy.REPLACE,
+                            morningRequest
+                        )
+                    } else {
+                        workManager.cancelAllWorkByTag(com.shrimpadvisor.plcycle.FeedingReminderWorker.WORK_TAG)
+                    }
+                }
+            )
+        }
+    }
+}
+
 /**
  * 1. Animated FCR Gauge
  * Renders a sweep gauge indicating FCR efficiency (1.0 to 2.2+)

@@ -46,5 +46,12 @@ data class PondCycle(
     val mortalityAcceleration: Double = 0.0,  // added fraction per day each week (0.0005 = +0.05%/day per week)
 
     // Regional Profile Link
-    val regionProfileId: Int? = null
+    val regionProfileId: Int? = null,
+
+    // Configurable Agronomic Coefficients
+    val carryingCapacityRatio: Double = 6.0, // kg/m²
+    val diseaseMortalityMultiplier: Double = 2.5,
+    val week1SurvivalBaselineStock: Double = 85.0,
+    val week1SurvivalBaselineHold: Double = 75.0,
+    val week1SurvivalBaselineReject: Double = 50.0
 )

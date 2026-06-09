@@ -226,6 +226,7 @@ class PondCycleViewModel(
 
     fun sendChatMessage(question: String) {
         val cycle = _activeCycle.value ?: return
+        val currentHistory = _chatMessages.value
         val userMsg = ChatMessage(text = question, isUser = true)
         _chatMessages.update { it + userMsg }
         _isAiLoading.value = true
@@ -233,7 +234,13 @@ class PondCycleViewModel(
             val last14Readings = activeReadings.value
                 .sortedBy { it.pondAge }
                 .takeLast(14)
-            val reply = GeminiAdvisor.ask(BuildConfig.GEMINI_API_KEY, cycle, question, last14Readings)
+            val reply = GeminiAdvisor.ask(
+                BuildConfig.GEMINI_API_KEY,
+                cycle,
+                question,
+                last14Readings,
+                currentHistory.takeLast(10) // Send last 10 messages for context
+            )
             _chatMessages.update { it + ChatMessage(text = reply, isUser = false) }
             _isAiLoading.value = false
         }
@@ -249,7 +256,10 @@ class PondCycleViewModel(
             AdvisorEngine.evaluatePLQuality(
                 stressTolerance = it.stressToleranceScore,
                 gutFullness = it.gutFullnessScore,
-                supplierScore = it.supplierScore
+                supplierScore = it.supplierScore,
+                baselineStock = it.week1SurvivalBaselineStock,
+                baselineHold = it.week1SurvivalBaselineHold,
+                baselineReject = it.week1SurvivalBaselineReject
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -264,7 +274,8 @@ class PondCycleViewModel(
                 ph = it.ph,
                 salinity = it.salinity,
                 temp = it.temp,
-                tan = it.tanLevel
+                tan = it.tanLevel,
+                carryingCapacityRatio = it.carryingCapacityRatio
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -315,7 +326,8 @@ class PondCycleViewModel(
                 currentAge = it.currentAge,
                 mortalityRatePerDay = it.customMortalityRate,
                 mortalityAcceleration = it.mortalityAcceleration,
-                regionProfile = profile
+                regionProfile = profile,
+                diseaseMultiplier = it.diseaseMortalityMultiplier
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
