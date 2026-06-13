@@ -255,8 +255,8 @@ fun ShrimpAppMainContainer(
                     Pair("Report", Icons.Default.Summarize),
                     Pair("History", Icons.Default.History),
                     Pair("Compare", Icons.Default.CompareArrows),
-    Pair("Stats", Icons.Default.BarChart),
-    Pair("Settings", Icons.Default.Settings)
+                    Pair("Stats", Icons.Default.BarChart),
+                    Pair("Settings", Icons.Default.Settings)
                 ).forEachIndexed { index, (label, icon) ->
                     Tab(
                         selected = activeTab == index,

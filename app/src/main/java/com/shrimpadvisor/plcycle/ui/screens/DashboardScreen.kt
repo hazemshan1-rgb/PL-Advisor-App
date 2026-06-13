@@ -337,7 +337,7 @@ fun DashboardOverviewTab(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(Icons.Default.BioTech, contentDescription = null,
+                        Icon(Icons.Default.Science, contentDescription = null,
                             tint = riskColor, modifier = Modifier.size(22.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Disease Risk Index", fontSize = 13.sp, fontWeight = FontWeight.Bold,

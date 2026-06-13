@@ -71,9 +71,10 @@ class AdvisorEngineTest {
     fun `evaluateStocking flags carrying capacity exceeded when density is very high`() {
         val result = AdvisorEngine.evaluateStocking(
             pondSize = 1000.0,
-            proposedDensity = 200.0,
+            proposedDensity = 400.0,
             targetWeight = 20.0,
-            oxygen = 6.5, ph = 8.0, salinity = 25.0, temp = 28.5, tan = 0.1
+            oxygen = 6.5, ph = 8.0, salinity = 25.0, temp = 28.5, tan = 0.1,
+            carryingCapacityRatio = 6.0
         )
         assertTrue(result.carryingCapacityExceeded)
     }
