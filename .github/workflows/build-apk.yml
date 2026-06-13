@@ -59,7 +59,7 @@ jobs:
           EOF
 
       - name: Make gradlew executable
-        run: chmod +x gradlew
+        run: chmod +x gradlew gradlew.bat
 
       - uses: gradle/actions/setup-gradle@v4
 
