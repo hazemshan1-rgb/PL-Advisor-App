@@ -46,7 +46,8 @@ object GeminiAdvisor {
     internal fun buildPrompt(
         cycle: PondCycle,
         question: String,
-        recentReadings: List<DailyReading> = emptyList()
+        recentReadings: List<DailyReading> = emptyList(),
+        history: List<ChatMessage> = emptyList()
     ) = buildString {
         appendLine("You are an expert shrimp aquaculture advisor specializing in intensive L. vannamei (whiteleg shrimp) biofloc farming.")
         appendLine("Provide concise, actionable advice — 3 to 5 sentences unless a detailed protocol is explicitly requested.")
@@ -216,15 +217,25 @@ object GeminiAdvisor {
             }
         }
 
+        if (history.isNotEmpty()) {
+            appendLine()
+            appendLine("=== Previous Conversation History ===")
+            for (msg in history) {
+                val role = if (msg.isUser) "Farmer" else "Advisor"
+                appendLine("$role: ${msg.text}")
+            }
+        }
+
         appendLine()
-        appendLine("Farmer's question: $question")
+        appendLine("Farmer's current question: $question")
     }
 
     suspend fun ask(
         apiKey: String,
         cycle: PondCycle,
         question: String,
-        recentReadings: List<DailyReading> = emptyList()
+        recentReadings: List<DailyReading> = emptyList(),
+        history: List<ChatMessage> = emptyList()
     ): String =
         withContext(Dispatchers.IO) {
             if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
@@ -234,7 +245,7 @@ object GeminiAdvisor {
             try {
                 val body = GeminiRequest(
                     contents = listOf(
-                        GeminiContent(parts = listOf(GeminiPart(buildPrompt(cycle, question, recentReadings))))
+                        GeminiContent(parts = listOf(GeminiPart(buildPrompt(cycle, question, recentReadings, history))))
                     )
                 )
                 val json = requestAdapter.toJson(body)

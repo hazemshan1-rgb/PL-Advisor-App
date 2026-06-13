@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [PondCycle::class, DailyReading::class, RegionProfile::class], version = 4, exportSchema = false)
+@Database(entities = [PondCycle::class, DailyReading::class, RegionProfile::class], version = 5, exportSchema = false)
 abstract class PondCycleDatabase : RoomDatabase() {
     abstract fun pondCycleDao(): PondCycleDao
     abstract fun dailyReadingDao(): DailyReadingDao
@@ -95,6 +95,16 @@ abstract class PondCycleDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `pond_cycles` ADD COLUMN `carryingCapacityRatio` REAL NOT NULL DEFAULT 6.0")
+                database.execSQL("ALTER TABLE `pond_cycles` ADD COLUMN `diseaseMortalityMultiplier` REAL NOT NULL DEFAULT 2.5")
+                database.execSQL("ALTER TABLE `pond_cycles` ADD COLUMN `week1SurvivalBaselineStock` REAL NOT NULL DEFAULT 85.0")
+                database.execSQL("ALTER TABLE `pond_cycles` ADD COLUMN `week1SurvivalBaselineHold` REAL NOT NULL DEFAULT 75.0")
+                database.execSQL("ALTER TABLE `pond_cycles` ADD COLUMN `week1SurvivalBaselineReject` REAL NOT NULL DEFAULT 50.0")
+            }
+        }
+
         fun getDatabase(context: Context): PondCycleDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -102,7 +112,7 @@ abstract class PondCycleDatabase : RoomDatabase() {
                     PondCycleDatabase::class.java,
                     "shrimp_pond_cycles_db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                 INSTANCE = instance
                 instance

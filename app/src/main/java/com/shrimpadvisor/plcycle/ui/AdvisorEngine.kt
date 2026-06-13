@@ -28,7 +28,10 @@ object AdvisorEngine {
     fun evaluatePLQuality(
         stressTolerance: Int,
         gutFullness: Int,
-        supplierScore: Int
+        supplierScore: Int,
+        baselineStock: Double = 85.0,
+        baselineHold: Double = 75.0,
+        baselineReject: Double = 50.0
     ): QualityResult {
         val score = (stressTolerance + gutFullness + supplierScore) / 3.0
         val verdict = when {
@@ -38,9 +41,9 @@ object AdvisorEngine {
         }
         
         val baseline = when (verdict) {
-            QualityVerdict.STOCK -> 85.0
-            QualityVerdict.HOLD -> 75.0
-            QualityVerdict.REJECT -> 50.0
+            QualityVerdict.STOCK -> baselineStock
+            QualityVerdict.HOLD -> baselineHold
+            QualityVerdict.REJECT -> baselineReject
         }
         
         val recommendations = mutableListOf<String>()
@@ -100,10 +103,10 @@ object AdvisorEngine {
         ph: Double,
         salinity: Double,
         temp: Double,
-        tan: Double
+        tan: Double,
+        carryingCapacityRatio: Double = 6.0
     ): StockingResult {
         // Carrying capacity logic
-        val carryingCapacityRatio = 6.0 // kg/m²
         val maxSafeBiomass = pondSize * carryingCapacityRatio * 0.80
         
         // Assume standard survival target over full cycle is 75%
@@ -390,7 +393,8 @@ object AdvisorEngine {
         currentAge: Int = 1,
         mortalityRatePerDay: Double = 0.004,
         mortalityAcceleration: Double = 0.0,
-        regionProfile: RegionProfile? = null
+        regionProfile: RegionProfile? = null,
+        diseaseMultiplier: Double = 2.5
     ): HarvestOptimizerResult {
         val initialStockingQty = proposedDensity * pondSize
         val currentShrimpQty = initialStockingQty * (estimatedSurvival / 100.0)
@@ -455,7 +459,7 @@ object AdvisorEngine {
         }
 
         val normalResult = runSimulation(mortalityRatePerDay, mortalityAcceleration)
-        val diseaseScenarioRate = mortalityRatePerDay * 2.5
+        val diseaseScenarioRate = mortalityRatePerDay * diseaseMultiplier
         val diseaseResult = runSimulation(diseaseScenarioRate, mortalityAcceleration)
 
         return normalResult.copy(scenarioResult = diseaseResult)
