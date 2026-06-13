@@ -58,16 +58,8 @@ jobs:
           kts.write_text(k)
           EOF
 
-      - name: Install Gradle wrapper
-        run: |
-          curl -fsSL https://services.gradle.org/distributions/gradle-8.10.2-bin.zip \
-            -o /tmp/gradle.zip
-          unzip -q /tmp/gradle.zip -d /tmp
-          /tmp/gradle-8.10.2/bin/gradle wrapper \
-            --gradle-version 8.10.2 \
-            --distribution-type bin \
-            --project-dir .
-          chmod +x gradlew
+      - name: Make gradlew executable
+        run: chmod +x gradlew
 
       - uses: gradle/actions/setup-gradle@v4
 
