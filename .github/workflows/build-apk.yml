@@ -11,14 +11,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Regenerate Gradle Wrapper
+      - name: Fix line endings and regenerate Gradle Wrapper
         run: |
+          find . -name "gradlew*" -type f -exec sed -i 's/\r$//' {} \;
           chmod +x gradlew gradlew.bat
           ./gradlew wrapper --gradle-version=8.7
 
@@ -62,9 +65,6 @@ jobs:
 
           kts.write_text(k)
           EOF
-
-      - name: Make gradlew executable
-        run: chmod +x gradlew gradlew.bat
 
       - uses: gradle/actions/setup-gradle@v4
 
