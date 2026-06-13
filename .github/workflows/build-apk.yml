@@ -23,27 +23,19 @@ jobs:
       - name: Create .env
         run: cp .env.example .env
 
-      - name: Patch build files to standard AGP 8.x
+      - name: Fix line endings in gradlew
+        run: |
+          sed -i 's/\r$//' gradlew
+          chmod +x gradlew
+
+      - name: Patch build files for CI
         run: |
           python3 - <<'EOF'
           import re, pathlib
 
-          # ── gradle/libs.versions.toml ──────────────────────────────────────
-          toml = pathlib.Path("gradle/libs.versions.toml")
-          t = toml.read_text()
-          t = re.sub(r'agp\s*=\s*"[^"]*"',              'agp = "8.7.3"',           t)
-          t = re.sub(r'kotlin\s*=\s*"[^"]*"',            'kotlin = "2.1.21"',       t)
-          t = re.sub(r'googleDevtoolsKsp\s*=\s*"[^"]*"', 'googleDevtoolsKsp = "2.1.21-1.0.32"', t)
-          toml.write_text(t)
-
           # ── app/build.gradle.kts ───────────────────────────────────────────
           kts = pathlib.Path("app/build.gradle.kts")
           k = kts.read_text()
-
-          # Replace AI Studio custom compileSdk DSL with integer form
-          k = re.sub(r'compileSdk\s*\{[^}]*\}', 'compileSdk = 35', k)
-          # Bring targetSdk in line
-          k = re.sub(r'targetSdk\s*=\s*36', 'targetSdk = 35', k)
 
           # Drop the release signing config block (keystore not available in CI)
           k = re.sub(
@@ -57,17 +49,6 @@ jobs:
 
           kts.write_text(k)
           EOF
-
-      - name: Install Gradle wrapper
-        run: |
-          curl -fsSL https://services.gradle.org/distributions/gradle-8.10.2-bin.zip \
-            -o /tmp/gradle.zip
-          unzip -q /tmp/gradle.zip -d /tmp
-          /tmp/gradle-8.10.2/bin/gradle wrapper \
-            --gradle-version 8.10.2 \
-            --distribution-type bin \
-            --project-dir .
-          chmod +x gradlew
 
       - uses: gradle/actions/setup-gradle@v4
 
