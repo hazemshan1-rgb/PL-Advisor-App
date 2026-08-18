@@ -38,7 +38,7 @@ jobs:
           t = toml.read_text()
           t = re.sub(r'agp\s*=\s*"[^"]*"',              'agp = "8.7.3"',           t)
           t = re.sub(r'kotlin\s*=\s*"[^"]*"',            'kotlin = "2.1.21"',       t)
-          t = re.sub(r'googleDevtoolsKsp\s*=\s*"[^"]*"', 'googleDevtoolsKsp = "2.1.21-1.0.32"', t)
+          t = re.sub(r'googleDevtoolsKsp\s*=\s*"[^"]*"', 'googleDevtoolsKsp = "2.1.21-2.0.2"', t)
           toml.write_text(t)
 
           # ── app/build.gradle.kts ───────────────────────────────────────────
