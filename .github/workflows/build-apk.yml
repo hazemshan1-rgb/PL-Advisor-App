@@ -19,11 +19,8 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Fix line endings and regenerate Gradle Wrapper
-        run: |
-          find . -name "gradlew*" -type f -exec sed -i 's/\r$//' {} \;
-          chmod +x gradlew gradlew.bat
-          ./gradlew wrapper --gradle-version=8.7
+      - name: Ensure gradlew is executable
+        run: chmod +x gradlew
 
       - name: Decode debug keystore
         run: base64 -d debug.keystore.base64 > debug.keystore
@@ -48,18 +45,36 @@ jobs:
           kts = pathlib.Path("app/build.gradle.kts")
           k = kts.read_text()
 
+          # Brace-depth-aware block replace/strip. A naive [^}]* regex breaks on
+          # any nested '{'/'}' pair — e.g. compileSdk's nested release(36){...}
+          # block, or "${rootDir}" string interpolation inside signingConfigs —
+          # because the FIRST '}' encountered (however deeply nested) satisfies
+          # the regex's own closing brace and truncates the match early,
+          # corrupting everything after it (see build failure 2026-06-13).
+          def replace_block(text: str, marker: str, replacement: str) -> str:
+              start = text.find(marker)
+              if start == -1:
+                  return text
+              brace_open = text.index("{", start)
+              depth = 0
+              i = brace_open
+              while i < len(text):
+                  if text[i] == "{":
+                      depth += 1
+                  elif text[i] == "}":
+                      depth -= 1
+                      if depth == 0:
+                          return text[:start] + replacement + text[i + 1:]
+                  i += 1
+              raise ValueError(f"Unbalanced braces while replacing {marker!r}")
+
           # Replace AI Studio custom compileSdk DSL with integer form
-          k = re.sub(r'compileSdk\s*\{[^}]*\}', 'compileSdk = 35', k)
+          k = replace_block(k, "compileSdk {", "compileSdk = 35")
           # Bring targetSdk in line
           k = re.sub(r'targetSdk\s*=\s*36', 'targetSdk = 35', k)
 
           # Drop the release signing config block (keystore not available in CI)
-          k = re.sub(
-              r'create\("release"\)\s*\{[^}]*\}',
-              '',
-              k,
-              flags=re.DOTALL
-          )
+          k = replace_block(k, 'create("release")', "")
           # Remove the reference to the now-deleted release signing config
           k = re.sub(r'\s*signingConfig = signingConfigs\.getByName\("release"\)', '', k)
 
