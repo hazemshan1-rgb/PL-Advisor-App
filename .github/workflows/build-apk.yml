@@ -36,7 +36,7 @@ jobs:
           # ── gradle/libs.versions.toml ──────────────────────────────────────
           toml = pathlib.Path("gradle/libs.versions.toml")
           t = toml.read_text()
-          t = re.sub(r'agp\s*=\s*"[^"]*"',              'agp = "8.7.3"',           t)
+          t = re.sub(r'agp\s*=\s*"[^"]*"',              'agp = "8.11.2"',           t)
           t = re.sub(r'kotlin\s*=\s*"[^"]*"',            'kotlin = "2.1.21"',       t)
           t = re.sub(r'googleDevtoolsKsp\s*=\s*"[^"]*"', 'googleDevtoolsKsp = "2.1.21-2.0.2"', t)
           toml.write_text(t)
@@ -68,10 +68,10 @@ jobs:
                   i += 1
               raise ValueError(f"Unbalanced braces while replacing {marker!r}")
 
-          # Replace AI Studio custom compileSdk DSL with integer form
-          k = replace_block(k, "compileSdk {", "compileSdk = 35")
-          # Bring targetSdk in line
-          k = re.sub(r'targetSdk\s*=\s*36', 'targetSdk = 35', k)
+          # Replace AI Studio custom compileSdk DSL with integer form.
+          # compileSdk 36 (not 35) — AndroidX core-ktx 1.18.0 requires compiling
+          # against API 36 and AGP >= 8.9.1; targetSdk is left as declared (36).
+          k = replace_block(k, "compileSdk {", "compileSdk = 36")
 
           # Drop the release signing config block (keystore not available in CI)
           k = replace_block(k, 'create("release")', "")
